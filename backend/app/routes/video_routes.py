@@ -82,10 +82,12 @@ def upload_video(
         file.file.close()
 
     # Save metadata in PostgreSQL
+    file_type_clean = extension.replace(".", "")
     video = Video(
         user_id=current_user.id,
         filename=safe_filename,
         file_path=str(file_path),
+        file_type=file_type_clean,
         status="uploaded",
     )
 
@@ -97,6 +99,7 @@ def upload_video(
         "id": video.id,
         "filename": video.filename,
         "file_path": video.file_path,
+        "file_type": video.file_type,
         "status": video.status,
         "uploaded_at": video.uploaded_at,
         "message": "Video uploaded successfully",

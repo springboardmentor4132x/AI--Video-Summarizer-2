@@ -64,12 +64,14 @@ export default function HistoryPage() {
             <div className="table">
               <div className="row header">
                 <span>Filename</span>
+                <span>Format</span>
                 <span>Status</span>
                 <span>Uploaded</span>
               </div>
               {videos.map((v) => (
                 <div className="row" key={v.id}>
                   <span>{v.filename}</span>
+                  <span><code className="tag">{(v.file_type || "mp4").toUpperCase()}</code></span>
                   <span><b className="status">{v.status}</b></span>
                   <span>{new Date(v.uploaded_at).toLocaleString()}</span>
                 </div>
