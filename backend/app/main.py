@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine, Base
-from app.routes import auth_routes
+from app.routes import auth_routes, video_routes
 
 # Create database tables automatically if they do not exist
 Base.metadata.create_all(bind=engine)
@@ -36,6 +36,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_routes.router)
+app.include_router(video_routes.router)
 
 
 @app.get("/", tags=["Health"])

@@ -5,7 +5,39 @@ import Link from "next/link";
 
 export default function HistoryPage() {
   const [videos, setVideos] = useState([]);
-  useEffect(() => setVideos(JSON.parse(localStorage.getItem("clipmind_videos") || "[]")), []);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function fetchVideos() {
+      const token = localStorage.getItem("clipmind_token");
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch("http://localhost:8000/videos/", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setVideos(data);
+        } else {
+          setError("Failed to load video history.");
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchVideos();
+  }, []);
 
   return (
     <main className="app-shell">
@@ -20,19 +52,30 @@ export default function HistoryPage() {
       <section className="content">
         <p className="eyebrow">VIDEO MANAGEMENT</p>
         <h1>Upload History</h1>
-        <p className="muted">Track uploaded files and their current processing status.</p>
+        <p className="muted">Track uploaded files stored in PostgreSQL and their current processing status.</p>
         <div className="panel">
-          {videos.length === 0 ? <p className="empty">No uploads found.</p> :
+          {loading ? (
+            <p className="muted">Loading video history...</p>
+          ) : error ? (
+            <p className="error">{error}</p>
+          ) : videos.length === 0 ? (
+            <p className="empty">No uploads found.</p>
+          ) : (
             <div className="table">
-              <div className="row header"><span>Filename</span><span>Status</span><span>Uploaded</span></div>
-              {videos.slice().reverse().map(v => (
+              <div className="row header">
+                <span>Filename</span>
+                <span>Status</span>
+                <span>Uploaded</span>
+              </div>
+              {videos.map((v) => (
                 <div className="row" key={v.id}>
                   <span>{v.filename}</span>
                   <span><b className="status">{v.status}</b></span>
-                  <span>{v.uploadedAt}</span>
+                  <span>{new Date(v.uploaded_at).toLocaleString()}</span>
                 </div>
               ))}
-            </div>}
+            </div>
+          )}
         </div>
       </section>
     </main>

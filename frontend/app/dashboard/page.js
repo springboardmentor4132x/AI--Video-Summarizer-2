@@ -12,12 +12,29 @@ export default function Dashboard() {
   useEffect(() => {
     const token = localStorage.getItem("clipmind_token");
     if (!token) return router.push("/login");
+
     setUser(JSON.parse(localStorage.getItem("clipmind_user") || "{}"));
-    setVideos(JSON.parse(localStorage.getItem("clipmind_videos") || "[]"));
+
+    async function loadVideos() {
+      try {
+        const res = await fetch("http://localhost:8000/videos/", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setVideos(data);
+        }
+      } catch (err) {
+        console.error("Failed to load videos:", err);
+      }
+    }
+
+    loadVideos();
   }, [router]);
 
   function logout() {
     localStorage.removeItem("clipmind_token");
+    localStorage.removeItem("clipmind_user");
     router.push("/login");
   }
 
@@ -46,8 +63,8 @@ export default function Dashboard() {
 
         <div className="stats">
           <div className="stat"><span>Total Videos</span><strong>{videos.length}</strong></div>
-          <div className="stat"><span>Processing</span><strong>{videos.filter(v => v.status === "Processing").length}</strong></div>
-          <div className="stat"><span>Completed</span><strong>{videos.filter(v => v.status === "Completed").length}</strong></div>
+          <div className="stat"><span>Uploaded</span><strong>{videos.filter(v => v.status === "uploaded").length}</strong></div>
+          <div className="stat"><span>Processing</span><strong>{videos.filter(v => v.status === "processing").length}</strong></div>
         </div>
 
         <div className="grid-two">
@@ -60,20 +77,25 @@ export default function Dashboard() {
           </div>
           <div className="panel">
             <div className="panel-head"><h2>Access</h2></div>
-            <p className="muted">Your current role is <b>{user.role}</b>. The backend will enforce permissions using JWT and RBAC.</p>
+            <p className="muted">Your current role is <b>{user.role}</b>. The backend enforces security using JWT and RBAC.</p>
           </div>
         </div>
 
         <div className="panel">
           <div className="panel-head"><h2>Recent Videos</h2><Link href="/history">View all</Link></div>
-          {videos.length === 0 ? <p className="empty">No videos uploaded yet.</p> :
+          {videos.length === 0 ? (
+            <p className="empty">No videos uploaded yet.</p>
+          ) : (
             <div className="table">
-              {videos.slice(-5).reverse().map(v => (
+              {videos.slice(0, 5).map((v) => (
                 <div className="row" key={v.id}>
-                  <span>{v.filename}</span><span>{v.status}</span><span>{v.uploadedAt}</span>
+                  <span>{v.filename}</span>
+                  <span>{v.status}</span>
+                  <span>{new Date(v.uploaded_at).toLocaleDateString()}</span>
                 </div>
               ))}
-            </div>}
+            </div>
+          )}
         </div>
       </section>
     </main>
