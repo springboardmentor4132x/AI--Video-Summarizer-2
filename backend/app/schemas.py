@@ -49,3 +49,13 @@ class UserOut(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+class VideoOut(BaseModel):
+    id: int
+    user_id: int
+    filename: str
+    file_path: str
+    status: str
+    uploaded_at: datetime
+
+    class Config:
+        from_attributes = True
