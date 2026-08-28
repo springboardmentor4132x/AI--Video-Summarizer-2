@@ -51,6 +51,8 @@ class Video(Base):
     file_path = Column(String(500), nullable=False)
     file_type = Column(String(50), nullable=True)  # e.g., mp4, webm, mov, mkv
     status = Column(String(50), nullable=False, default="uploaded")  # e.g., uploaded, processing, completed, failed
+    summary = Column(String, nullable=True)
+    transcript = Column(String, nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationship to owning user

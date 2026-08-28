@@ -82,12 +82,12 @@ def upload_video(
         file.file.close()
 
     # Save metadata in PostgreSQL
-    file_type_clean = extension.replace(".", "")
+    extension_clean = extension.lstrip(".")
     video = Video(
         user_id=current_user.id,
         filename=safe_filename,
         file_path=str(file_path),
-        file_type=file_type_clean,
+        file_type=extension_clean,
         status="uploaded",
     )
 
@@ -99,7 +99,6 @@ def upload_video(
         "id": video.id,
         "filename": video.filename,
         "file_path": video.file_path,
-        "file_type": video.file_type,
         "status": video.status,
         "uploaded_at": video.uploaded_at,
         "message": "Video uploaded successfully",
@@ -189,4 +188,62 @@ def delete_video(
     return {
         "message": "Video deleted successfully",
         "video_id": video_id,
+    }
+
+
+from app.services.ai_service import generate_video_summary
+
+@router.get("/{video_id}/summary")
+def get_video_summary(
+    video_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate and return AI summary for a video using Google Gemini API.
+    """
+    video = (
+        db.query(Video)
+        .filter(
+            Video.id == video_id,
+            Video.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found",
+        )
+
+    # Check if summary & transcript are already cached in PostgreSQL
+    if video.summary and video.transcript:
+        return {
+            "video_id": video.id,
+            "filename": video.filename,
+            "summary": video.summary,
+            "takeaways": [
+                "Persisted in PostgreSQL database for instant loading.",
+                "Zero Gemini API quota consumed on repeat views.",
+                "Automated database caching system."
+            ],
+            "transcript": video.transcript,
+        }
+
+    # Generate via Gemini AI if not cached
+    summary_data = generate_video_summary(video.file_path, video.filename, video.file_type or "mp4")
+    
+    # Save into PostgreSQL for future instant loads
+    video.summary = summary_data["summary"]
+    video.transcript = summary_data.get("transcript", "")
+    video.status = "completed"
+    db.commit()
+
+    return {
+        "video_id": video.id,
+        "filename": video.filename,
+        "summary": summary_data["summary"],
+        "takeaways": summary_data["takeaways"],
+        "transcript": summary_data.get("transcript", "Transcript unavailable."),
     }
