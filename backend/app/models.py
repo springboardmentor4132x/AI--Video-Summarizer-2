@@ -8,9 +8,10 @@ Entities:
 - Video: Metadata for videos uploaded by users for processing.
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import ARRAY
 
 from app.database import Base
 
@@ -60,3 +61,25 @@ class Video(Base):
 
     def __repr__(self):
         return f"<Video(id={self.id}, filename='{self.filename}', status='{self.status}')>"
+
+
+class TranscriptChunk(Base):
+    """
+    TranscriptChunk entity representing a chunk of a video transcript and its semantic embedding.
+    """
+    __tablename__ = "transcript_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    video_id = Column(Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    chunk_text = Column(String, nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    embedding = Column(ARRAY(Float), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    video = relationship("Video", backref="chunks")
+    user = relationship("User")
+
+    def __repr__(self):
+        return f"<TranscriptChunk(id={self.id}, video_id={self.video_id}, chunk_index={self.chunk_index})>"

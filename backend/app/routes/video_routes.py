@@ -191,59 +191,108 @@ def delete_video(
     }
 
 
+from app.database import SessionLocal
 from app.services.ai_service import generate_video_summary
+from app.services.embedding_service import process_and_store_embeddings
+from fastapi import BackgroundTasks
+
+def process_video_pipeline_background(video_id: int, file_path: str, filename: str, file_type: str, user_id: int):
+    """Heavy background worker for transcribing and embedding videos natively."""
+    bg_db = SessionLocal()
+    try:
+        video = bg_db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            return
+
+        print(f"\n[Worker] Starting dedicated background AI pipeline for Video {video_id}...")
+        
+        # 1. Run Heavy AI Transcript & Summary Module (Whisper & HF)
+        summary_data = generate_video_summary(file_path, filename, file_type)
+        
+        video.summary = summary_data["summary"]
+        video.transcript = summary_data.get("transcript", "Transcript unavailable.")
+        video.status = "completed"
+        bg_db.commit()
+        
+        # 2. Offload semantic chunking and native ARRAY(Float) embedding
+        process_and_store_embeddings(video.transcript, video_id, user_id, bg_db)
+        print(f"[Worker] Pipeline complete! Successfully finished processing Video {video_id}")
+
+    except Exception as e:
+        bg_db.rollback()
+        video = bg_db.query(Video).filter(Video.id == video_id).first()
+        if video:
+            video.status = "failed"
+            bg_db.commit()
+        print(f"[Worker] Fatal Background Processing Error: {e}")
+    finally:
+        bg_db.close()
 
 @router.get("/{video_id}/summary")
 def get_video_summary(
     video_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Generate and return AI summary for a video using Google Gemini API.
+    Triggers AI summary processing in the background, keeping the API fast and non-blocking.
     """
     video = (
         db.query(Video)
-        .filter(
-            Video.id == video_id,
-            Video.user_id == current_user.id,
-        )
+        .filter(Video.id == video_id, Video.user_id == current_user.id)
         .first()
     )
 
     if not video:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Video not found",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
 
-    # Check if summary & transcript are already cached in PostgreSQL
-    if video.summary and video.transcript:
+    # If it is currently being crushed by the Background Worker
+    if video.status == "processing":
+        return {
+            "video_id": video.id,
+            "filename": video.filename,
+            "status": "processing",
+            "message": "AI is actively analyzing this video in the background. Please wait...",
+            "summary": "Processing...",
+            "takeaways": [],
+            "transcript": "Processing..."
+        }
+
+    # Check if summary & transcript are already safely finished and cached
+    if video.status == "completed" and video.summary:
         return {
             "video_id": video.id,
             "filename": video.filename,
             "summary": video.summary,
             "takeaways": [
-                "Persisted in PostgreSQL database for instant loading.",
-                "Zero Gemini API quota consumed on repeat views.",
-                "Automated database caching system."
+                "Persisted directly from PostgreSQL.",
+                "Zero background worker usage consumed.",
+                "Automated database caching activated."
             ],
             "transcript": video.transcript,
         }
 
-    # Generate via Gemini AI if not cached
-    summary_data = generate_video_summary(video.file_path, video.filename, video.file_type or "mp4")
-    
-    # Save into PostgreSQL for future instant loads
-    video.summary = summary_data["summary"]
-    video.transcript = summary_data.get("transcript", "")
-    video.status = "completed"
+    # Lock the video state to prevent duplicate requests from firing
+    video.status = "processing"
     db.commit()
+    
+    # Hand the heavy CPU AI task to FastAPI's Background Worker Queue!
+    background_tasks.add_task(
+        process_video_pipeline_background, 
+        video.id, 
+        video.file_path, 
+        video.filename, 
+        video.file_type or "mp4", 
+        current_user.id
+    )
 
     return {
         "video_id": video.id,
         "filename": video.filename,
-        "summary": summary_data["summary"],
-        "takeaways": summary_data["takeaways"],
-        "transcript": summary_data.get("transcript", "Transcript unavailable."),
+        "status": "processing",
+        "message": "Video sent to Dedicated AI Background Worker! UI will not freeze.",
+        "summary": "Processing...",
+        "takeaways": [],
+        "transcript": "Processing..."
     }
