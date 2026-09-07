@@ -1,4 +1,4 @@
-# Khushi's Implementation: Transcript Chunking & Embedding
+# Implementation: Transcript Chunking & Embedding
 
 ## Overview
 This module completes the transition from cloud AI to **100% Offline, Local-first AI Processing**. 
