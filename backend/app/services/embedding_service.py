@@ -95,3 +95,58 @@ def process_and_store_embeddings(transcript_text: str, video_id: int, user_id: i
         # Gracefully handle failure so it doesn't crash or invalidate the successfully generated transcript
         db.rollback()
         print(f"[Embedding Service] Error generating/saving embeddings: {e}")
+
+import numpy as np
+
+def search_transcript_similarity(query: str, video_id: int, user_id: int, db: Session, top_k: int = 5):
+    """
+    Sanjana's Similarity and Importance Scoring implementation!
+    Bypasses pgvector by manually computing Cosine Similarity using NumPy on PostgreSQL ARRAY(Float).
+    """
+    os.environ["HF_HOME"] = r"D:\temp\hf_cache"
+    from sentence_transformers import SentenceTransformer
+    
+    # Load model entirely offline
+    model = SentenceTransformer('all-MiniLM-L6-v2', cache_folder=r"D:\temp\hf_cache")
+    query_embedding = model.encode(query)
+    
+    chunks = db.query(TranscriptChunk).filter(
+        TranscriptChunk.video_id == video_id, 
+        TranscriptChunk.user_id == user_id
+    ).all()
+    
+    if not chunks:
+        return []
+        
+    results = []
+    
+    # Compute Cosine Similarity Formula natively in NumPy
+    query_norm = np.linalg.norm(query_embedding)
+    if query_norm == 0:
+        return []
+        
+    for chunk in chunks:
+        if not chunk.embedding:
+            continue
+            
+        chunk_emb = np.array(chunk.embedding)
+        chunk_norm = np.linalg.norm(chunk_emb)
+        
+        if chunk_norm == 0:
+            continue
+            
+        similarity = np.dot(query_embedding, chunk_emb) / (query_norm * chunk_norm)
+        
+        # Calculate Sanjana's Importance Score (Percentage representation)
+        importance_score = round(float(similarity) * 100, 2)
+        
+        results.append({
+            "chunk_index": chunk.chunk_index,
+            "text": chunk.chunk_text,
+            "similarity": round(float(similarity), 4),
+            "importance_score": importance_score
+        })
+        
+    # Sort natively by highest importance first
+    results.sort(key=lambda x: x["importance_score"], reverse=True)
+    return results[:top_k]
