@@ -199,6 +199,41 @@ from app.services.embedding_service import process_and_store_embeddings, search_
 from app.models import TranscriptChunk
 from fastapi import BackgroundTasks
 
+def extract_video_metadata(file_path: str):
+    """Uses FFprobe to extract duration, width, height from the video file."""
+    import json as _json
+    ffprobe_bin = shutil.which("ffprobe") or r"C:\Users\KHUSHI\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffprobe.exe"
+    try:
+        cmd = [
+            ffprobe_bin, "-v", "quiet", "-print_format", "json",
+            "-show_format", "-show_streams", file_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        data = _json.loads(result.stdout)
+
+        duration = None
+        width = None
+        height = None
+
+        # Get duration from format
+        if "format" in data and "duration" in data["format"]:
+            duration = int(float(data["format"]["duration"]))
+
+        # Get resolution from first video stream
+        for stream in data.get("streams", []):
+            if stream.get("codec_type") == "video":
+                width = stream.get("width")
+                height = stream.get("height")
+                if not duration and "duration" in stream:
+                    duration = int(float(stream["duration"]))
+                break
+
+        return {"duration": duration, "width": width, "height": height}
+    except Exception as e:
+        print(f"[FFprobe] Metadata extraction failed: {e}")
+        return {"duration": None, "width": None, "height": None}
+
+
 def process_video_pipeline_background(video_id: int, file_path: str, filename: str, file_type: str, user_id: int):
     """Heavy background worker for transcribing and embedding videos natively."""
     bg_db = SessionLocal()
@@ -208,6 +243,18 @@ def process_video_pipeline_background(video_id: int, file_path: str, filename: s
             return
 
         print(f"\n[Worker] Starting dedicated background AI pipeline for Video {video_id}...")
+
+        # 0. Extract video metadata (Duration, Resolution, File Size) via FFprobe
+        meta = extract_video_metadata(file_path)
+        video.duration = meta.get("duration")
+        video.width = meta.get("width")
+        video.height = meta.get("height")
+        try:
+            video.file_size = os.path.getsize(file_path)
+        except Exception:
+            pass
+        bg_db.commit()
+        print(f"[Worker] Metadata extracted: {meta.get('duration')}s, {meta.get('width')}x{meta.get('height')}, {video.file_size} bytes")
         
         # 1. Run Heavy AI Transcript & Summary Module (Whisper & HF)
         summary_data = generate_video_summary(file_path, filename, file_type)

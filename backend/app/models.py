@@ -54,6 +54,10 @@ class Video(Base):
     status = Column(String(50), nullable=False, default="uploaded")  # e.g., uploaded, processing, completed, failed
     summary = Column(String, nullable=True)
     transcript = Column(String, nullable=True)
+    duration = Column(Integer, nullable=True)       # Video duration in seconds (extracted via FFprobe)
+    width = Column(Integer, nullable=True)           # Video width in pixels
+    height = Column(Integer, nullable=True)          # Video height in pixels
+    file_size = Column(Integer, nullable=True)       # File size in bytes
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationship to owning user
