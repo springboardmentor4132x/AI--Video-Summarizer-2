@@ -64,7 +64,7 @@ class VideoOut(BaseModel):
     height: Optional[int] = None
     file_size: Optional[int] = None
     error_message: Optional[str] = None
-    has_thumbnail: bool = False
+    has_thumbnail: bool = True
     has_audio: bool = True
     created_at: datetime = Field(validation_alias="uploaded_at")
     

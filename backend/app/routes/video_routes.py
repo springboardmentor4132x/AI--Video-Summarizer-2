@@ -11,6 +11,7 @@ DELETE /videos/{video_id}  -> Delete a video
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from fastapi import (
@@ -467,10 +468,36 @@ def stream_video(video_id: int, db: Session = Depends(get_db)):
     return FileResponse(file_path, media_type=mime_type, filename=video.filename)
 
 
+THUMBNAIL_DIR = Path("uploads/thumbnails")
+THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
+
 @router.get("/{video_id}/thumbnail")
 def get_thumbnail(video_id: int, db: Session = Depends(get_db)):
-    """Returns a placeholder thumbnail response so the frontend doesn't 404."""
-    raise HTTPException(status_code=404, detail="No thumbnail available")
+    """Serves the extracted JPEG thumbnail image for the video."""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    thumb_path = THUMBNAIL_DIR / f"{video_id}.jpg"
+
+    # Generate on demand if missing but video file exists
+    if not thumb_path.exists() and os.path.exists(video.file_path):
+        import shutil
+        ffmpeg_bin = shutil.which("ffmpeg") or r"C:\Users\KHUSHI\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffmpeg.exe"
+        try:
+            cmd = [ffmpeg_bin, "-y", "-ss", "00:00:01", "-i", str(video.file_path), "-vframes", "1", "-q:v", "2", str(thumb_path)]
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception as e:
+            print(f"[Thumbnail Error] Could not extract thumbnail for {video_id}: {e}")
+
+    if thumb_path.exists():
+        return FileResponse(str(thumb_path), media_type="image/jpeg")
+
+    # Fallback to streaming video frame if thumbnail file unavailable
+    if os.path.exists(video.file_path):
+        return FileResponse(video.file_path, media_type="video/mp4")
+
+    raise HTTPException(status_code=404, detail="Thumbnail unavailable")
 
 
 # --- Sanjana's Similarity & Importance Scoring Search Endpoint ---

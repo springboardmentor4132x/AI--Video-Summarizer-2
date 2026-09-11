@@ -33,13 +33,19 @@ export default function VideosPage() {
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {videos.map((video) => (
           <Link key={video.id} href={`/videos/${video.id}`} className="card overflow-hidden hover:border-ember/40">
-            <div className="aspect-video bg-ink-950">
-              {video.has_thumbnail ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={mediaUrl(video.id, "thumbnail")} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full items-center justify-center text-sand/30">No thumbnail yet</div>
-              )}
+            <div className="relative aspect-video overflow-hidden bg-black/60 group">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={mediaUrl(video.id, "thumbnail")}
+                alt={video.title}
+                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                onError={(e) => {
+                  (e.currentTarget as HTMLElement).style.display = "none";
+                }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-ember text-white shadow-lg">▶</span>
+              </div>
             </div>
             <div className="space-y-2 p-4">
               <div className="flex items-start justify-between gap-2">
