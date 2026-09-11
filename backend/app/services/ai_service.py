@@ -82,7 +82,7 @@ def generate_video_summary(file_path: str, filename: str, file_type: str = "mp4"
 
     print(f"[AI Offline Engines] Processing Complete! Returning results to frontend.")
     return {
-        "summary": short,
+        "summary": f"{short}|||{detailed}",  # short|||detailed split on retrieval
         "takeaways": takeaways[:3],
         "transcript": transcript
     }

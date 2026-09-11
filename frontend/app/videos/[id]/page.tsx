@@ -19,6 +19,11 @@ export default function VideoDetailPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const playerRef = useRef<HTMLVideoElement>(null);
+  // Sanjana's Semantic Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{chunk_index:number; text:string; similarity:number; importance_score:number}[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
 
   const load = useCallback(async () => {
     const [v, j, t, s, a] = await Promise.all([api.video(params.id), api.jobs(params.id), api.transcript(params.id), api.summary(params.id), api.analysis(params.id)]);
@@ -81,6 +86,24 @@ export default function VideoDetailPage() {
     if (playerRef.current) {
       playerRef.current.currentTime = seconds;
       void playerRef.current.play();
+    }
+  }
+
+  async function runSearch() {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    setSearchError("");
+    try {
+      const res = await fetch(`http://localhost:8000/videos/${params.id}/search?q=${encodeURIComponent(searchQuery)}&top_k=5`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("clipmind_token")}` }
+      });
+      const data = await res.json();
+      setSearchResults(data.results || []);
+      if ((data.results || []).length === 0) setSearchError(data.message || "No results found.");
+    } catch {
+      setSearchError("Search failed. Make sure the video has been processed first.");
+    } finally {
+      setSearching(false);
     }
   }
 
@@ -178,6 +201,7 @@ export default function VideoDetailPage() {
           {analysis.key_moments.length ? <ul className="mt-5 space-y-2">{analysis.key_moments.map((moment) => <li key={moment.id}><button className="w-full border-b border-white/10 py-3 text-left hover:text-ember" onClick={() => seekTo(moment.start_sec)}><div className="flex items-center justify-between gap-3"><span className="font-mono text-xs text-moss">{formatTime(moment.start_sec)}</span><span className="text-xs text-sand/50">{moment.score?.toFixed(2)}</span></div><p className="mt-1 line-clamp-2 text-sm text-sand/80">{moment.transcript_text || moment.title}</p></button></li>)}</ul> : <p className="mt-5 text-sm text-sand/50">No highlights detected yet.</p>}
         </div>
       </section>
+
     </AppShell>
   );
 }

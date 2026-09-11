@@ -118,7 +118,48 @@ export const api = {
   generateSummary: (id: string) => request<JobItem>(`/videos/${id}/summary`, { method: "POST" }),
   analysis: (id: string) => request<AnalysisItem>(`/videos/${id}/analysis`),
   rerunAnalysis: (id: string) => request<JobItem>(`/videos/${id}/analysis`, { method: "POST" }),
+  analytics: (days: number = 7) => request<AnalyticsDashboardData>(`/analytics/dashboard?days=${days}`),
   health: () => request<{ status: string }>("/health"),
+};
+
+export type AnalyticsDashboardData = {
+  days: number;
+  metrics: {
+    total_videos: number;
+    completed_videos: number;
+    transcripts_generated: number;
+    summaries_generated: number;
+    total_duration_sec: number;
+    total_duration_formatted: string;
+    avg_duration_sec: number;
+    avg_duration_formatted: string;
+    success_rate: number;
+    failed_processing: number;
+  };
+  over_time: {
+    date: string;
+    uploaded: number;
+    completed: number;
+    failed: number;
+  }[];
+  status_distribution: {
+    name: string;
+    value: number;
+    color: string;
+  }[];
+  duration_distribution: {
+    range: string;
+    count: number;
+  }[];
+  insights: string[];
+  recent_activity: {
+    id: string;
+    title: string;
+    status: string;
+    uploaded_at: string;
+    owner_name: string;
+    duration: string;
+  }[];
 };
 
 export function mediaUrl(videoId: string, kind: "stream" | "thumbnail") {

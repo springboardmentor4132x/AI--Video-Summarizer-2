@@ -38,6 +38,27 @@ app.add_middleware(
 app.include_router(auth_routes.router)
 app.include_router(video_routes.router)
 
+from app.auth import get_current_user
+from app.models import User
+from app.schemas import UserOut
+from fastapi import Depends
+
+@app.get("/users/me", response_model=UserOut, tags=["Users"])
+def read_users_me_alias(current_user: User = Depends(get_current_user)):
+    """Frontend compatibility alias bridging Utkarsh's API to Khushi's Auth layer."""
+    return current_user
+
+from sqlalchemy.orm import Session
+from app.database import get_db
+
+@app.get("/users", response_model=list[UserOut], tags=["Users"])
+def get_all_users_alias(db: Session = Depends(get_db)):
+    """Endpoint expected by Utkarsh's Dashboard."""
+    return db.query(User).all()
+
+
+from app.routes.video_routes import get_analytics_dashboard
+app.get("/analytics/dashboard", tags=["Analytics"])(get_analytics_dashboard)
 
 @app.get("/", tags=["Health"])
 def root():
