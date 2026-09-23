@@ -25,6 +25,12 @@ export default function VideoDetailPage() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
 
+  // Offline Multilingual Translation
+  const [translating, setTranslating] = useState(false);
+  const [targetLang, setTargetLang] = useState("hin_Deva");
+  const [translatedSummary, setTranslatedSummary] = useState("");
+  const [translatedTranscript, setTranslatedTranscript] = useState("");
+
   const load = useCallback(async () => {
     const [v, j, t, s, a] = await Promise.all([api.video(params.id), api.jobs(params.id), api.transcript(params.id), api.summary(params.id), api.analysis(params.id)]);
     setVideo(v);
@@ -86,6 +92,22 @@ export default function VideoDetailPage() {
     if (playerRef.current) {
       playerRef.current.currentTime = seconds;
       void playerRef.current.play();
+    }
+  }
+
+  async function runTranslation() {
+    setTranslating(true);
+    setError("");
+    setTranslatedSummary("");
+    setTranslatedTranscript("");
+    try {
+      const res = await api.translate(params.id, targetLang);
+      setTranslatedSummary(res.translated_summary || "");
+      setTranslatedTranscript(res.translated_transcript || "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Translation failed.");
+    } finally {
+      setTranslating(false);
     }
   }
 
@@ -153,8 +175,8 @@ export default function VideoDetailPage() {
           <p className="mt-1 text-sm text-sand/60">
             Extracts audio and a thumbnail, then generates a timestamped transcript for analysis.
           </p>
-          <button className="btn-primary mt-4" onClick={processNow} disabled={busy || video.status === "processing"}>
-            {busy || video.status === "processing" ? "Processing…" : "Run processing"}
+          <button className="btn-primary mt-4" onClick={processNow} disabled={busy}>
+            {busy ? "Starting processing…" : video.status === "processing" ? "Re-run processing" : "Run processing"}
           </button>
           {latest ? (
             <div className="mt-4">
@@ -190,6 +212,48 @@ export default function VideoDetailPage() {
         {summary?.status === "completed" ? <div className="mt-5 grid gap-5 md:grid-cols-2"><div><h3 className="font-medium text-ember">Short summary</h3><p className="mt-2 text-sm leading-7 text-sand/80">{summary.short_text}</p></div><div><h3 className="font-medium text-ember">Detailed summary</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-sand/80">{summary.detailed_text}</p></div></div> : null}
         {canManage ? <button className="btn-primary mt-5" onClick={generateSummary} disabled={busy || summary?.status === "processing" || transcript?.status !== "completed"}>{summary?.status === "completed" ? "Regenerate summary" : "Generate summary"}</button> : null}
       </section>
+
+      {summary?.status === "completed" && (
+        <section className="card mt-6 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">Multilingual</p>
+              <h2 className="mt-1 text-xl">Offline Translation (Meta NLLB-200)</h2>
+            </div>
+            <StatusBadge status={translatedSummary ? "completed" : "not_started"} />
+          </div>
+          
+          <div className="mt-5 flex items-center gap-4">
+            <select 
+              className="input max-w-xs" 
+              value={targetLang} 
+              onChange={e => setTargetLang(e.target.value)}
+              disabled={translating}
+            >
+              <option value="hin_Deva">Hindi (हिन्दी)</option>
+              <option value="ara_Arab">Arabic (العربية)</option>
+              <option value="fra_Latn">French (Français)</option>
+              <option value="spa_Latn">Spanish (Español)</option>
+              <option value="deu_Latn">German (Deutsch)</option>
+            </select>
+            <button className="btn-primary" onClick={runTranslation} disabled={translating}>
+              {translating ? "Translating natively..." : "Translate Content"}
+            </button>
+          </div>
+
+          {translating && <p className="mt-5 text-sm text-sand/60 animate-pulse">Running Meta NLLB model locally. This uses heavy CPU and may take 1-2 minutes for large transcripts...</p>}
+
+          {!translating && translatedSummary && (
+            <div className="mt-5 border-t border-white/10 pt-5">
+              <h3 className="font-medium text-ember">Translated Summary</h3>
+              <p className="mt-2 text-sm leading-7 text-sand/80">{translatedSummary}</p>
+              
+              <h3 className="mt-6 font-medium text-ember">Translated Transcript</h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-sand/80">{translatedTranscript}</p>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="mt-6 grid gap-6 lg:grid-cols-2">
         <div className="card p-6">

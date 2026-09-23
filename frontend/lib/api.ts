@@ -118,6 +118,7 @@ export const api = {
   generateSummary: (id: string) => request<JobItem>(`/videos/${id}/summary`, { method: "POST" }),
   analysis: (id: string) => request<AnalysisItem>(`/videos/${id}/analysis`),
   rerunAnalysis: (id: string) => request<JobItem>(`/videos/${id}/analysis`, { method: "POST" }),
+  translate: (id: string, target_lang: string) => request<{lang: string, translated_summary: string, translated_transcript: string}>(`/videos/${id}/translate`, { method: "POST", body: JSON.stringify({ target_lang }) }),
   analytics: (days: number = 7) => request<AnalyticsDashboardData>(`/analytics/dashboard?days=${days}`),
   health: () => request<{ status: string }>("/health"),
 };

@@ -196,8 +196,47 @@ def delete_video(
 from app.database import SessionLocal
 from app.services.ai_service import generate_video_summary
 from app.services.embedding_service import process_and_store_embeddings, search_transcript_similarity
+from app.services.translation_service import translate_text
 from app.models import TranscriptChunk
 from fastapi import BackgroundTasks
+from pydantic import BaseModel
+
+class TranslationRequest(BaseModel):
+    target_lang: str
+
+@router.post("/{video_id}/translate")
+def translate_video_content(
+    video_id: int,
+    req: TranslationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Translates the video transcript and summary into the target language on-demand.
+    Example langs: hin_Deva (Hindi), mar_Deva (Marathi)
+    """
+    video = db.query(Video).filter(Video.id == video_id, Video.user_id == current_user.id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+        
+    if not video.summary and not video.transcript:
+        raise HTTPException(status_code=400, detail="Cannot translate empty content. Run AI pipeline first.")
+
+    target_lang = req.target_lang
+    try:
+        translated_summary = translate_text(video.summary, target_lang=target_lang) if video.summary else None
+        
+        # Transcript might be very long. The UI could pass options, but for now we'll translate it all.
+        translated_transcript = translate_text(video.transcript, target_lang=target_lang) if video.transcript else None
+        
+        return {
+            "lang": target_lang,
+            "translated_summary": translated_summary,
+            "translated_transcript": translated_transcript
+        }
+    except Exception as e:
+        print(f"[Translation API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Translation engine failed: {str(e)}")
 
 def extract_video_metadata(file_path: str):
     """Uses FFprobe to extract duration, width, height from the video file."""
@@ -256,13 +295,11 @@ def process_video_pipeline_background(video_id: int, file_path: str, filename: s
         bg_db.commit()
         print(f"[Worker] Metadata extracted: {meta.get('duration')}s, {meta.get('width')}x{meta.get('height')}, {video.file_size} bytes")
         
-        # 1. Run Heavy AI Transcript & Summary Module (Whisper & HF)
+        # 1. Run Heavy AI Transcript & Summary Module (Whisper & HF (or Extractive NLP fallback))
         summary_data = generate_video_summary(file_path, filename, file_type)
         
         video.summary = summary_data["summary"]
         video.transcript = summary_data.get("transcript", "Transcript unavailable.")
-        video.status = "completed"
-        bg_db.commit()
         
         # 2. Delete old chunks so fresh embeddings can be stored on regeneration
         bg_db.query(TranscriptChunk).filter(TranscriptChunk.video_id == video_id).delete()
@@ -270,6 +307,11 @@ def process_video_pipeline_background(video_id: int, file_path: str, filename: s
         
         # 3. Offload semantic chunking and native ARRAY(Float) embedding
         process_and_store_embeddings(video.transcript, video_id, user_id, bg_db)
+
+        # 4. NOW set status to completed so frontend sees everything at once
+        video.status = "completed"
+        bg_db.commit()
+        
         print(f"[Worker] Pipeline complete! Successfully finished processing Video {video_id}")
 
     except Exception as e:
@@ -277,6 +319,7 @@ def process_video_pipeline_background(video_id: int, file_path: str, filename: s
         video = bg_db.query(Video).filter(Video.id == video_id).first()
         if video:
             video.status = "failed"
+            video.error_message = str(e)
             bg_db.commit()
         print(f"[Worker] Fatal Background Processing Error: {e}")
     finally:
@@ -302,8 +345,8 @@ def get_video_summary(
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
 
-    # If it is not completed or processing yet, start processing in background
-    if video.status in ("uploaded", "failed"):
+    # If freshly uploaded, start processing in background
+    if video.status == "uploaded":
         video.status = "processing"
         db.commit()
         background_tasks.add_task(
@@ -703,7 +746,7 @@ def get_analytics_dashboard(
             "title": v.filename,
             "status": v.status,
             "uploaded_at": v.uploaded_at.strftime("%b %d, %H:%M") if v.uploaded_at else "Recently",
-            "owner_name": v.owner.name if v.owner else "Creator",
+            "owner_name": (v.owner.name if v.owner else None) or "Creator",
             "duration": dur_str
         })
 
