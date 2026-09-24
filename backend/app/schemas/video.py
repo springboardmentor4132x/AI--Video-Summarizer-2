@@ -26,6 +26,18 @@ class VideoOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class LearningQuestionOut(BaseModel):
+    id: str
+    video_id: str
+    topic_id: str | None
+    start_sec: float
+    end_sec: float
+    question: str
+    hint: str
+    score: float | None
+    created_at: datetime
+
+
 class VideoUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=512)
     description: str | None = None
@@ -99,3 +111,4 @@ class KeyMomentOut(BaseModel):
 class AnalysisOut(BaseModel):
     topics: list[TopicOut]
     key_moments: list[KeyMomentOut]
+    questions: list[LearningQuestionOut]

@@ -99,6 +99,7 @@ pytest
 - Video upload and history
 - FFmpeg: duration, thumbnail, 16 kHz audio
 - Whisper transcript generation with timestamped segments
+- Hugging Face local model question and hint generation with deterministic fallback
 - Transcript chunking and topic segmentation
 - Sentence Transformer embeddings with a local lexical fallback
 - Importance scoring and overlapping highlight suppression
@@ -107,3 +108,5 @@ pytest
 - API endpoints for analysis retrieval and reruns
 
 Apply database migrations before starting the backend. See `docs/architecture.md` for the Module 3 processing flow and scoring rationale.
+
+Question generation uses `google/flan-t5-small` through Transformers. The model is downloaded from Hugging Face on the first analysis run and cached locally. Set `QUESTION_MODEL` in the environment to use another compatible text-to-text model.

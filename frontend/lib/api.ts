@@ -56,7 +56,16 @@ export type SummaryItem = {
 };
 export type TopicItem = { id: string; video_id: string; start_sec: number; end_sec: number; title: string; transcript_text: string; created_at: string };
 export type KeyMomentItem = { id: string; video_id: string; topic_id: string | null; start_sec: number; end_sec: number; title: string; transcript_text: string | null; score: number | null; moment_type: string; created_at: string };
-export type AnalysisItem = { topics: TopicItem[]; key_moments: KeyMomentItem[] };
+export type LearningQuestionItem = { id: string; video_id: string; topic_id: string | null; start_sec: number; end_sec: number; question: string; hint: string; score: number | null; created_at: string };
+export type AnalysisItem = { topics: TopicItem[]; key_moments: KeyMomentItem[]; questions: LearningQuestionItem[] };
+export type LearnerAnalytics = {
+  videos_viewed: number;
+  total_views: number;
+  active_days: number;
+  available_videos: number;
+  daily_views: { date: string; views: number }[];
+  recent_views: { video_id: string; title: string; viewed_at: string }[];
+};
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -118,6 +127,7 @@ export const api = {
   generateSummary: (id: string) => request<JobItem>(`/videos/${id}/summary`, { method: "POST" }),
   analysis: (id: string) => request<AnalysisItem>(`/videos/${id}/analysis`),
   rerunAnalysis: (id: string) => request<JobItem>(`/videos/${id}/analysis`, { method: "POST" }),
+  learnerAnalytics: () => request<LearnerAnalytics>("/analytics/learner"),
   health: () => request<{ status: string }>("/health"),
 };
 

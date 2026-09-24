@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     admin_password: str = "Admin123!"
     whisper_model: str = "base"
     summarizer_model: str = "facebook/bart-large-cnn"
+    question_model: str = "google/flan-t5-small"
 
     @property
     def cors_origin_list(self) -> list[str]:

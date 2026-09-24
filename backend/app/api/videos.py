@@ -11,8 +11,8 @@ from app.db import get_db
 from app.deps import get_current_user, get_current_user_optional_query
 from app.models.engagement import AnalyticsEvent, AuditLog
 from app.models.user import User, UserRole
-from app.models.video import ContentStatus, JobStatus, JobType, KeyMoment, ProcessingJob, Summary, Topic, Transcript, Video, VideoStatus
-from app.schemas.video import AnalysisOut, JobOut, KeyMomentOut, SummaryOut, TopicOut, TranscriptOut, TranscriptUpdate, VideoOut, VideoUpdate
+from app.models.video import ContentStatus, JobStatus, JobType, KeyMoment, LearningQuestion, ProcessingJob, Summary, Topic, Transcript, Video, VideoStatus
+from app.schemas.video import AnalysisOut, JobOut, KeyMomentOut, LearningQuestionOut, SummaryOut, TopicOut, TranscriptOut, TranscriptUpdate, VideoOut, VideoUpdate
 from app.services.queue import enqueue_analysis, enqueue_ffmpeg, enqueue_summary
 from app.services.storage import ALLOWED_CONTENT_TYPES, ALLOWED_EXTENSIONS, resolve_storage_path, video_dir
 
@@ -81,6 +81,12 @@ def to_key_moment_out(moment: KeyMoment) -> KeyMomentOut:
                                                 start_sec=moment.start_sec, end_sec=moment.end_sec, title=moment.title,
                                                 transcript_text=moment.transcript_text, score=moment.score,
                                                 moment_type=moment.moment_type, created_at=moment.created_at)
+
+
+def to_learning_question_out(question: LearningQuestion) -> LearningQuestionOut:
+    return LearningQuestionOut(id=str(question.id), video_id=str(question.video_id), topic_id=str(question.topic_id) if question.topic_id else None,
+                               start_sec=question.start_sec, end_sec=question.end_sec, question=question.question,
+                               hint=question.hint, score=question.score, created_at=question.created_at)
 
 
 def can_view(user: User, video: Video) -> bool:
@@ -340,7 +346,8 @@ def get_analysis(video_id: uuid.UUID, db: Session = Depends(get_db), current_use
         raise HTTPException(status_code=404, detail="Video not found")
     topics = db.scalars(select(Topic).where(Topic.video_id == video_id).order_by(Topic.start_sec)).all()
     moments = db.scalars(select(KeyMoment).where(KeyMoment.video_id == video_id).order_by(KeyMoment.start_sec)).all()
-    return AnalysisOut(topics=[to_topic_out(topic) for topic in topics], key_moments=[to_key_moment_out(moment) for moment in moments])
+    questions = db.scalars(select(LearningQuestion).where(LearningQuestion.video_id == video_id).order_by(LearningQuestion.start_sec)).all()
+    return AnalysisOut(topics=[to_topic_out(topic) for topic in topics], key_moments=[to_key_moment_out(moment) for moment in moments], questions=[to_learning_question_out(question) for question in questions])
 
 
 @router.post("/{video_id}/analysis", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)

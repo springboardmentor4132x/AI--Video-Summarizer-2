@@ -2,7 +2,8 @@ import uuid
 from pathlib import Path
 
 from app.db import SessionLocal
-from app.models.video import ContentStatus, JobStatus, JobType, KeyMoment, ProcessingJob, Summary, Topic, Transcript, Video, VideoStatus
+from app.models.video import ContentStatus, JobStatus, JobType, KeyMoment, LearningQuestion, ProcessingJob, Summary, Topic, Transcript, Video, VideoStatus
+from app.services.ai import generate_learning_question
 from app.services.analysis import analyze_transcript
 from app.services.ffmpeg import FFmpegError, extract_audio, extract_thumbnail, probe_video
 from app.services.ai import summarize_text, transcribe_audio
@@ -161,8 +162,9 @@ def process_analysis(job_id: str, video_id: str) -> None:
         if job is None or transcript is None or transcript.status != ContentStatus.COMPLETED:
             return
         _update_job(db, job, status=JobStatus.RUNNING, progress=10)
-        result = analyze_transcript(transcript.segments or [])
+        result = analyze_transcript(transcript.segments or [], question_generator=generate_learning_question)
         db.query(KeyMoment).filter(KeyMoment.video_id == uuid.UUID(str(video_id))).delete()
+        db.query(LearningQuestion).filter(LearningQuestion.video_id == uuid.UUID(str(video_id))).delete()
         db.query(Topic).filter(Topic.video_id == uuid.UUID(str(video_id))).delete()
         topics: dict[int, Topic] = {}
         for item in result["topics"]:
@@ -175,6 +177,12 @@ def process_analysis(job_id: str, video_id: str) -> None:
                 video_id=uuid.UUID(str(video_id)), topic_id=topics[item["topic_index"]].id,
                 start_sec=item["start"], end_sec=item["end"], title=item["text"][:512],
                 transcript_text=item["text"], score=item["score"], moment_type="highlight",
+            ))
+        for item in result["questions"]:
+            db.add(LearningQuestion(
+                video_id=uuid.UUID(str(video_id)), topic_id=topics[item["topic_index"]].id,
+                start_sec=item["start"], end_sec=item["end"], question=item["question"],
+                hint=item["hint"], score=item["score"],
             ))
         _update_job(db, job, status=JobStatus.COMPLETED, progress=100)
     except Exception as exc:  # noqa: BLE001

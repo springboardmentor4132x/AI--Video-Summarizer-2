@@ -4,6 +4,7 @@ from app.models.video import (
     JobStatus,
     JobType,
     KeyMoment,
+    LearningQuestion,
     ProcessingJob,
     Summary,
     Transcript,

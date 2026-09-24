@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
@@ -15,6 +16,11 @@ _STOP_WORDS = {
 _IMPORTANCE_WORDS = {
     "important", "key", "because", "therefore", "definition", "example", "result",
     "conclusion", "first", "second", "finally", "means", "called", "how", "why",
+}
+_QUESTION_CUES = {
+    "definition", "defined", "means", "called", "how", "step", "steps", "first", "then",
+    "next", "finally", "because", "why", "important", "reason", "example", "examples",
+    "instance", "result", "therefore", "conclusion", "summary", "summarize",
 }
 
 
@@ -105,12 +111,125 @@ def _overlaps(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return shorter > 0 and intersection / shorter >= 0.5
 
 
+def _question_anchor(text: str) -> str:
+    words = [word for word in re.findall(r"[a-z][a-z0-9'-]+", text.lower()) if word not in _STOP_WORDS and word not in _QUESTION_CUES]
+    unique_words = list(dict.fromkeys(words))
+    return " ".join(unique_words[:4]) or "the main idea"
+
+
+def _question_prompt(text: str, question_index: int) -> tuple[str, str]:
+    lowered = text.lower()
+    anchor = _question_anchor(text)
+    if any(marker in lowered for marker in ("definition", "defined as", "means", "called")):
+        prompts = [
+            (f"How does the video define \"{anchor}\"?", f"Listen for the characteristics used to define \"{anchor}\"."),
+            (f"What makes \"{anchor}\" different from related ideas?", f"Compare the description of \"{anchor}\" with the contrast made in the video."),
+        ]
+        return prompts[question_index % len(prompts)]
+    if any(marker in lowered for marker in ("how", "step", "first", "then", "next", "finally")):
+        prompts = [
+            (f"What are the main steps in the process involving \"{anchor}\"?", f"Recall what happens first, what follows, and how the process ends for \"{anchor}\"."),
+            (f"What changes as the process involving \"{anchor}\" moves forward?", f"Track the input, action, and result described for \"{anchor}\"."),
+            (f"Why does the video use this process for \"{anchor}\"?", f"Focus on the purpose of the steps, not only their order, for \"{anchor}\"."),
+        ]
+        return prompts[question_index % len(prompts)]
+    if any(marker in lowered for marker in ("because", "why", "important", "reason")):
+        prompts = [
+            (f"Why does the video say \"{anchor}\" matters?", f"Look for the reason the speaker gives for the importance of \"{anchor}\"."),
+            (f"What problem does \"{anchor}\" help explain or solve?", f"Connect \"{anchor}\" to the problem or consequence mentioned in the explanation."),
+        ]
+        return prompts[question_index % len(prompts)]
+    if "example" in lowered or "for instance" in lowered:
+        prompts = [
+            (f"What idea does the example about \"{anchor}\" illustrate?", f"Look past the details of the example and identify what \"{anchor}\" is meant to show."),
+            (f"How does the example clarify \"{anchor}\"?", f"Use the example's outcome to explain the role of \"{anchor}\"."),
+        ]
+        return prompts[question_index % len(prompts)]
+    if any(marker in lowered for marker in ("result", "therefore", "conclusion", "in summary")):
+        prompts = [
+            (f"What result does the video connect to \"{anchor}\"?", f"Listen for the outcome linked to \"{anchor}\" and the reasoning that leads to it."),
+            (f"What conclusion should a learner draw about \"{anchor}\"?", f"Review the evidence before the conclusion and connect it to \"{anchor}\"."),
+        ]
+        return prompts[question_index % len(prompts)]
+    prompts = [
+        (
+            f"What central claim does the video make about \"{anchor}\", and how is it supported?",
+            f"Identify the claim about \"{anchor}\", then recall the explanation or evidence that follows it.",
+        ),
+        (
+            f"How does \"{anchor}\" connect to the main subject of the video?",
+            f"Use the transition into this section and the repeated terms that explain \"{anchor}\".",
+        ),
+    ]
+    question, hint = prompts[question_index % len(prompts)]
+    return question, hint
+
+
+def generate_learning_questions(scored_chunks: list[dict[str, Any]], max_questions: int = 5) -> list[dict[str, Any]]:
+    """Create recall prompts from the highest-value transcript chunks without answers."""
+    questions: list[dict[str, Any]] = []
+    selected: list[dict[str, Any]] = []
+    for question_index, chunk in enumerate(sorted(scored_chunks, key=lambda item: item["score"], reverse=True)):
+        if any(_overlaps(chunk, existing) for existing in selected):
+            continue
+        question, hint = _question_prompt(chunk["text"], question_index)
+        if any(item["question"] == question for item in questions):
+            question = f"What new point about {_question_anchor(chunk['text'])} should a learner remember?"
+            hint = f"Review the explanation around {_question_anchor(chunk['text'])} and identify the point that was added here."
+        questions.append({
+            "start": chunk["start"],
+            "end": chunk["end"],
+            "topic_index": chunk["topic_index"],
+            "question": question,
+            "hint": hint,
+            "score": chunk["score"],
+        })
+        selected.append(chunk)
+        if len(questions) == max_questions:
+            break
+    return sorted(questions, key=lambda item: item["start"])
+
+
+def generate_learning_questions_with_model(
+    scored_chunks: list[dict[str, Any]],
+    generator: Callable[[str], tuple[str, str] | None],
+    max_questions: int = 5,
+) -> list[dict[str, Any]]:
+    """Prefer model-generated prompts while retaining deterministic fallback behavior."""
+    questions: list[dict[str, Any]] = []
+    selected: list[dict[str, Any]] = []
+    for chunk in sorted(scored_chunks, key=lambda item: item["score"], reverse=True):
+        if any(_overlaps(chunk, existing) for existing in selected):
+            continue
+        generated = generator(chunk["text"])
+        if generated is None:
+            fallback = generate_learning_questions([chunk], max_questions=1)
+            question, hint = fallback[0]["question"], fallback[0]["hint"]
+        else:
+            question, hint = generated
+        if any(item["question"].casefold() == question.casefold() for item in questions):
+            continue
+        questions.append({
+            "start": chunk["start"],
+            "end": chunk["end"],
+            "topic_index": chunk["topic_index"],
+            "question": question,
+            "hint": hint,
+            "score": chunk["score"],
+        })
+        selected.append(chunk)
+        if len(questions) == max_questions:
+            break
+    return sorted(questions, key=lambda item: item["start"])
+
+
 def analyze_transcript(
     segments: list[dict[str, Any]],
     *,
     max_chars: int = 900,
     boundary_threshold: float = 0.22,
     max_highlights: int = 8,
+    question_generator: Callable[[str], tuple[str, str] | None] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     chunks = chunk_transcript(segments, max_chars=max_chars)
     similarities = _similarities(chunks)
@@ -136,4 +255,5 @@ def analyze_transcript(
         if len(selected) == max_highlights:
             break
     selected.sort(key=lambda item: item["start"])
-    return {"topics": topics, "highlights": selected}
+    questions = generate_learning_questions_with_model(scored, question_generator) if question_generator else generate_learning_questions(scored)
+    return {"topics": topics, "highlights": selected, "questions": questions}

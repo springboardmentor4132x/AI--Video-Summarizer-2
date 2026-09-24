@@ -65,6 +65,7 @@ class Video(Base):
     )
     key_moments: Mapped[list["KeyMoment"]] = relationship(back_populates="video", cascade="all, delete-orphan")
     topics: Mapped[list["Topic"]] = relationship(back_populates="video", cascade="all, delete-orphan")
+    learning_questions: Mapped[list["LearningQuestion"]] = relationship(back_populates="video", cascade="all, delete-orphan")
 
 
 class JobType(str, enum.Enum):
@@ -175,3 +176,20 @@ class Topic(Base):
 
     video: Mapped[Video] = relationship(back_populates="topics")
     key_moments: Mapped[list[KeyMoment]] = relationship(back_populates="topic")
+
+
+class LearningQuestion(Base):
+    __tablename__ = "learning_questions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    video_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    topic_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("topics.id", ondelete="SET NULL"), nullable=True, index=True)
+    start_sec: Mapped[float] = mapped_column(Float)
+    end_sec: Mapped[float] = mapped_column(Float)
+    question: Mapped[str] = mapped_column(Text)
+    hint: Mapped[str] = mapped_column(Text)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    video: Mapped[Video] = relationship(back_populates="learning_questions")
+    topic: Mapped["Topic | None"] = relationship()

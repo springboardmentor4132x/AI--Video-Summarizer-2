@@ -2,6 +2,37 @@ from pathlib import Path
 
 from app.config import settings
 
+_question_generator = None
+
+
+def generate_learning_question(context: str) -> tuple[str, str] | None:
+    """Generate one transcript-grounded question and hint with a local HF model."""
+    global _question_generator
+    try:
+        from transformers import pipeline
+
+        if _question_generator is None:
+            _question_generator = pipeline("text2text-generation", model=settings.question_model)
+        question_prompt = (
+            "Based only on this transcript passage, write one concise comprehension question "
+            "about its most important fact or concept. Do not answer the question.\nPassage:\n"
+            f"{context}"
+        )
+        question = _question_generator(question_prompt, max_new_tokens=64, do_sample=False)[0]["generated_text"].strip()
+        hint_prompt = (
+            "Write one short hint for the learner answering this question. Point to relevant "
+            "keywords or relationships in the passage, but do not reveal the answer.\n"
+            f"Question: {question}\nPassage:\n{context}"
+        )
+        hint = _question_generator(hint_prompt, max_new_tokens=64, do_sample=False)[0]["generated_text"].strip()
+        question = question.removeprefix("Question:").strip()
+        hint = hint.removeprefix("Hint:").strip()
+        if question and hint:
+            return question, hint
+    except Exception:
+        return None
+    return None
+
 
 def transcribe_audio(audio_path: Path) -> dict:
     try:
