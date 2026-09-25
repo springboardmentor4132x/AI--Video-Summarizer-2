@@ -21,7 +21,7 @@ export default function VideoDetailPage() {
   const playerRef = useRef<HTMLVideoElement>(null);
   // Sanjana's Semantic Search state
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<{chunk_index:number; text:string; similarity:number; importance_score:number}[]>([]);
+  const [searchResults, setSearchResults] = useState<{chunk_index:number; text:string; similarity:number; importance_score:number; start_sec:number}[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
 
@@ -168,6 +168,43 @@ export default function VideoDetailPage() {
 
       {video.error_message ? <p className="mt-4 text-sm text-red-300">{video.error_message}</p> : null}
       {error ? <p className="mt-4 text-sm text-red-300">{error}</p> : null}
+
+      <section className="card mt-6 p-6">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs uppercase tracking-widest text-moss">Semantic QA</p>
+          <h2 className="text-xl">Ask a question about this video</h2>
+          <div className="mt-3 flex items-center gap-3">
+            <input 
+              type="text" 
+              className="input flex-1" 
+              placeholder="e.g. How do we calculate the derivative?" 
+              value={searchQuery} 
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && runSearch()}
+              disabled={searching}
+            />
+            <button className="btn-primary" onClick={runSearch} disabled={searching || !searchQuery.trim()}>
+              {searching ? "Searching..." : "Ask Question"}
+            </button>
+          </div>
+          {searchError && <p className="text-sm text-red-400 mt-2">{searchError}</p>}
+          
+          {searchResults.length > 0 && (
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <h3 className="font-medium text-ember mb-3">Top Answer found</h3>
+              <div className="bg-white/5 p-4 rounded-lg flex items-start gap-4">
+                <div className="flex-1">
+                  <p className="text-sm text-sand/90">"{searchResults[0].text}"</p>
+                  <p className="text-xs font-mono text-moss mt-2">Similarity Match: {(searchResults[0].similarity * 100).toFixed(1)}%</p>
+                </div>
+                <button className="btn-ghost flex-shrink-0" onClick={() => seekTo(searchResults[0].start_sec)}>
+                  Jump to {formatTime(searchResults[0].start_sec)}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
 
       {canManage ? (
         <div className="card mt-8 p-6">

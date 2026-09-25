@@ -14,7 +14,8 @@ _QUESTION_CUES = {
 def _question_anchor(text: str) -> str:
     words = [word for word in re.findall(r"[a-z][a-z0-9'-]+", text.lower()) if word not in _STOP_WORDS and word not in _QUESTION_CUES]
     unique_words = list(dict.fromkeys(words))
-    return " ".join(unique_words[:4]) or "the main idea"
+    # Utkarsh's original code blindly took the first 4 words. Let's just take the first 2-3 to make it sound like a subject, or fallback.
+    return " ".join(unique_words[:2]) or "the main concept"
 
 def _question_prompt(text: str, question_index: int) -> tuple[str, str]:
     lowered = text.lower()

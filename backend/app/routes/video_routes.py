@@ -547,6 +547,48 @@ def get_video_analysis_compat(video_id: int, db: Session = Depends(get_db)):
     return {"topics": topics, "key_moments": key_moments, "questions": questions}
 
 
+@router.get("/{video_id}/search")
+def semantic_search_video(video_id: int, q: str, top_k: int = 5, db: Session = Depends(get_db)):
+    """
+    Personalized Q&A Video Search (Extractive).
+    Uses SentenceTransformer embeddings to find the most relevant chunk of transcript.
+    """
+    if not q or not q.strip():
+        return {"results": []}
+
+    chunks = db.query(TranscriptChunk).filter(TranscriptChunk.video_id == video_id).order_by(TranscriptChunk.chunk_index.asc()).all()
+    if not chunks:
+        return {"results": [], "message": "Video has no transcript yet."}
+
+    # Generate embeddings and similarities
+    chunk_texts = [c.chunk_text for c in chunks]
+    
+    # We can embed the query and transcript chunks to find the closest match.
+    from app.services.scoring_service import model
+    from sklearn.metrics.pairwise import cosine_similarity
+    
+    query_vector = model.encode([q], convert_to_numpy=True, normalize_embeddings=True)
+    chunk_vectors = model.encode(chunk_texts, convert_to_numpy=True, normalize_embeddings=True)
+    
+    similarities = cosine_similarity(query_vector, chunk_vectors)[0]
+    
+    results = []
+    for i, c in enumerate(chunks):
+        # Calculate start_sec approximation exactly like in key_moments
+        words_before = sum(len(chk.chunk_text.split()) for chk in chunks if chk.chunk_index < c.chunk_index)
+        start_sec = round((words_before / 130) * 60)
+        results.append({
+            "chunk_index": c.chunk_index,
+            "text": c.chunk_text,
+            "similarity": float(similarities[i]),
+            "importance_score": float(similarities[i]), # For UI compatibility
+            "start_sec": start_sec
+        })
+        
+    # Sort by highest similarity
+    results = sorted(results, key=lambda x: x["similarity"], reverse=True)[:top_k]
+    return {"results": results}
+
 @router.get("/{video_id}/stream")
 def stream_video(video_id: int, db: Session = Depends(get_db)):
     """
