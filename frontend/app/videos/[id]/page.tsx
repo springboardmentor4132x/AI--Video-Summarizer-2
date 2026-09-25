@@ -1,4 +1,6 @@
 "use client";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,6 +18,9 @@ export default function VideoDetailPage() {
   const [analysis, setAnalysis] = useState<AnalysisItem>({ topics: [], key_moments: [], questions: [] });
   const [editing, setEditing] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
+  
+  const [notes, setNotes] = useState("");
+  const [notesLoading, setNotesLoading] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const playerRef = useRef<HTMLVideoElement>(null);
@@ -53,6 +58,91 @@ export default function VideoDetailPage() {
     }, 2500);
     return () => clearInterval(timer);
   }, [jobs, video?.status, load]);
+
+    useEffect(() => {
+    const token = localStorage.getItem("clipmind_token");
+
+    if (!token) {
+      return;
+    }
+
+    fetch(`http://localhost:8000/videos/${params.id}/notes`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        setNotes(data.notes || "");
+      })
+      .catch(() => {});
+  }, [params.id]);
+
+  async function generateNotes() {
+    setError("");
+
+    if (!video) {
+      setError("Video information is not available yet.");
+      return;
+    }
+
+    if (video.status !== "completed") {
+      setError("Please wait until video processing is completed.");
+      return;
+    }
+
+    if (transcript?.status !== "completed") {
+      setError("Transcript is not available yet.");
+      return;
+    }
+
+    const token = localStorage.getItem("clipmind_token");
+
+    if (!token) {
+      setError("Authentication token not found. Please log in again.");
+      return;
+    }
+
+    setNotesLoading(true);
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/videos/${params.id}/notes`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            "Could not generate notes."
+        );
+      }
+
+      setNotes(typeof data.notes === "string" ? data.notes : "");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not generate notes."
+      );
+    } finally {
+      setNotesLoading(false);
+    }
+  }
 
   async function processNow() {
     setBusy(true);
@@ -138,7 +228,66 @@ export default function VideoDetailPage() {
     return (
       <AppShell>
         <p className="text-sand/50">{error || "Loading video…"}</p>
-      </AppShell>
+          {/* ========================================================
+          AI COMPLETE VIDEO NOTES
+      ======================================================== */}
+
+      {canManage &&
+      video.status === "completed" &&
+      transcript?.status === "completed" ? (
+        <section className="card mt-6 p-6">
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">
+                AI Study Notes
+              </p>
+
+              <h2 className="mt-1 text-xl">
+                Complete Video Notes
+              </h2>
+
+              <p className="mt-2 text-sm text-sand/60">
+                Generates structured study notes using the
+                transcript and visual information detected
+                from the video.
+              </p>
+            </div>
+
+            <StatusBadge
+              status={
+                notesLoading
+                  ? "processing"
+                  : notes
+                  ? "completed"
+                  : "not_started"
+              }
+            />
+
+          </div>
+
+          <button
+            type="button"
+            className="btn-primary mt-5"
+            onClick={generateNotes}
+            disabled={notesLoading}
+          >
+            {notesLoading
+              ? "Generating Notes..."
+              : notes
+              ? "Regenerate Notes"
+              : "Generate Notes"}
+          </button>
+
+          {notesLoading ? (
+            <p className="mt-4 text-sm text-sand/60">
+              Analyzing the transcript and visual context
+              from the video. This may take a little time.
+            </p>
+          ) : null}
+
+</AppShell>
     );
   }
 
@@ -333,7 +482,66 @@ export default function VideoDetailPage() {
         </section>
       )}
 
-    </AppShell>
+        {/* ========================================================
+          AI COMPLETE VIDEO NOTES
+      ======================================================== */}
+
+      {canManage &&
+      video.status === "completed" &&
+      transcript?.status === "completed" ? (
+        <section className="card mt-6 p-6">
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">
+                AI Study Notes
+              </p>
+
+              <h2 className="mt-1 text-xl">
+                Complete Video Notes
+              </h2>
+
+              <p className="mt-2 text-sm text-sand/60">
+                Generates structured study notes using the
+                transcript and visual information detected
+                from the video.
+              </p>
+            </div>
+
+            <StatusBadge
+              status={
+                notesLoading
+                  ? "processing"
+                  : notes
+                  ? "completed"
+                  : "not_started"
+              }
+            />
+
+          </div>
+
+          <button
+            type="button"
+            className="btn-primary mt-5"
+            onClick={generateNotes}
+            disabled={notesLoading}
+          >
+            {notesLoading
+              ? "Generating Notes..."
+              : notes
+              ? "Regenerate Notes"
+              : "Generate Notes"}
+          </button>
+
+          {notesLoading ? (
+            <p className="mt-4 text-sm text-sand/60">
+              Analyzing the transcript and visual context
+              from the video. This may take a little time.
+            </p>
+          ) : null}
+
+</AppShell>
   );
 }
 
