@@ -1,4 +1,4 @@
-import re
+﻿import re
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -44,7 +44,7 @@ def clean_ocr_text(text: str) -> str:
         return ""
 
     text = re.sub(
-        r"[|¦]+",
+        r"[|Â¦]+",
         " ",
         text,
     )
@@ -155,6 +155,53 @@ def format_timestamp(
         f"{minutes:02d}:"
         f"{secs:02d}"
     )
+
+
+def find_visuals_by_keywords(
+    visual_context: List[Dict[str, Any]],
+    keywords: List[str],
+) -> List[Dict[str, Any]]:
+
+    matched = []
+
+    for visual in visual_context:
+
+        text = get_visual_text(
+            visual
+        ).lower()
+
+        if contains_any(
+            text,
+            keywords,
+        ):
+            matched.append(
+                visual
+            )
+
+    return matched
+
+
+
+def find_ml_flow_visuals(
+    visual_context: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+
+    keywords = [
+        "machine learning",
+        "algorithm",
+        "pattern",
+        "patterns",
+        "new data",
+        "learned",
+        "input data",
+        "output",
+    ]
+
+    return find_visuals_by_keywords(
+        visual_context,
+        keywords,
+    )
+
 
 
 def get_timestamp_range(
@@ -424,6 +471,36 @@ def generate_title(
 # SECTION 1
 # ============================================================
 
+def find_cooking_visuals(
+    visual_context: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+
+    keywords = [
+        "chicken",
+        "cooking",
+        "cook",
+        "ingredient",
+        "ingredients",
+        "recipe",
+        "dish",
+        "food",
+        "meal",
+        "prepare",
+        "preparing",
+        "preparation",
+        "kitchen",
+        "cookery",
+        "cooked",
+        "instructions",
+        "attempt",
+        "attempts",
+    ]
+
+    return find_visuals_by_keywords(
+        visual_context,
+        keywords,
+    )
+
 def build_section_1(transcript: str) -> str:
     return """## 1. What is Machine Learning?
 
@@ -554,11 +631,11 @@ def build_section_6(
             [
                 "### Machine Learning Flow",
                 "",
-                "Input Data → Machine Learning Algorithm → Learned Patterns → New Data",
+                "Input Data â†’ Machine Learning Algorithm â†’ Learned Patterns â†’ New Data",
                 "",
                 (
                     f"The visual shown around "
-                    f"{format_timestamp(start)}–"
+                    f"{format_timestamp(start)}â€“"
                     f"{format_timestamp(end)} "
                     "illustrates how an algorithm uses data "
                     "to identify patterns and later apply "
@@ -590,7 +667,7 @@ def build_section_6(
                 "",
                 (
                     f"Around "
-                    f"{format_timestamp(start)}–"
+                    f"{format_timestamp(start)}â€“"
                     f"{format_timestamp(end)}, "
                     "the video shows repeated attempts at "
                     "preparing a dish."
@@ -646,7 +723,7 @@ def build_section_6(
                     "",
                     (
                         f"Around "
-                        f"{format_timestamp(start)}–"
+                        f"{format_timestamp(start)}â€“"
                         f"{format_timestamp(end)}, "
                         "the video shows repeated attempts "
                         "at preparing a dish."
