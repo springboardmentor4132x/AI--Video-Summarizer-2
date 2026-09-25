@@ -31,8 +31,16 @@ def recursive_text_splitter(text: str, chunk_size: int = 1000, chunk_overlap: in
             # We reached max capacity. Save current_chunk.
             if current_chunk.strip():
                 chunks.append(current_chunk.strip())
-            # Start the next chunk, carrying over exactly chunk_overlap characters from the end of current_chunk
-            overlap_prefix = current_chunk[-chunk_overlap:] if chunk_overlap > 0 else ""
+            # Fix: Snap overlap to nearest space to avoid cutting words in half
+            overlap_prefix = ""
+            if chunk_overlap > 0 and len(current_chunk) > chunk_overlap:
+                raw_overlap = current_chunk[-chunk_overlap:]
+                space_idx = raw_overlap.find(" ")
+                if space_idx != -1:
+                    overlap_prefix = raw_overlap[space_idx + 1:]
+                else:
+                    overlap_prefix = raw_overlap
+                    
             current_chunk = overlap_prefix + piece + sep
             
     if current_chunk.strip():
