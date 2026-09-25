@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Video, User
 from app.auth import get_current_user
+from app.services.notes_service import generate_video_notes
 
 
 router = APIRouter(
@@ -602,7 +603,6 @@ def get_video_notes_api(
         db.query(Video)
         .filter(
             Video.id == video_id,
-            Video.user_id == current_user.id,
         )
         .first()
     )
