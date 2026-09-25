@@ -506,7 +506,14 @@ def get_video_analysis_compat(video_id: int, db: Session = Depends(get_db)):
         start_sec = round((words_before / 130) * 60)
         end_sec = round(((words_before + len(chunk.chunk_text.split())) / 130) * 60)
         
-        first_sentence = chunk.chunk_text.split(".")[0].strip()[:80]
+        raw_sentence = chunk.chunk_text.split(".")[0].strip()
+        raw_sentence = raw_sentence.lstrip(", .;-")
+        if raw_sentence:
+            raw_sentence = raw_sentence[0].upper() + (raw_sentence[1:] if len(raw_sentence) > 1 else "")
+        
+        first_sentence = raw_sentence[:80]
+        if len(raw_sentence) > 80:
+            first_sentence += "..."
         
         # Attach Sanjana's scores safely
         importance_score = scores[i].get("importance_score", 0.0) if i < len(scores) else 0.0
