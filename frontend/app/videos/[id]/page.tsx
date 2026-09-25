@@ -1,4 +1,6 @@
 "use client";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -14,6 +16,9 @@ export default function VideoDetailPage() {
   const [transcript, setTranscript] = useState<TranscriptItem | null>(null);
   const [summary, setSummary] = useState<SummaryItem | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisItem>({ topics: [], key_moments: [] });
+  const [notes, setNotes] = useState("");
+  const [notesLoading, setNotesLoading] = useState(false);
+
   const [editing, setEditing] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
   const [error, setError] = useState("");
@@ -73,6 +78,91 @@ export default function VideoDetailPage() {
     try { await api.generateSummary(params.id); await load(); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not start summary"); }
     finally { setBusy(false); }
+  }
+
+  useEffect(() => {
+    const token = localStorage.getItem("clipmind_token");
+
+    if (!token) {
+      return;
+    }
+
+    fetch(`http://localhost:8000/videos/${params.id}/notes`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        setNotes(data.notes || "");
+      })
+      .catch(() => {});
+  }, [params.id]);
+
+  async function generateNotes() {
+    setError("");
+
+    if (!video) {
+      setError("Video information is not available yet.");
+      return;
+    }
+
+    if (video.status !== "completed") {
+      setError("Please wait until video processing is completed.");
+      return;
+    }
+
+    if (transcript?.status !== "completed") {
+      setError("Transcript is not available yet.");
+      return;
+    }
+
+    const token = localStorage.getItem("clipmind_token");
+
+    if (!token) {
+      setError("Authentication token not found. Please log in again.");
+      return;
+    }
+
+    setNotesLoading(true);
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/videos/${params.id}/notes`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            "Could not generate notes."
+        );
+      }
+
+      setNotes(typeof data.notes === "string" ? data.notes : "");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not generate notes."
+      );
+    } finally {
+      setNotesLoading(false);
+    }
   }
 
   async function rerunAnalysis() {
@@ -202,7 +292,174 @@ export default function VideoDetailPage() {
         </div>
       </section>
 
-    </AppShell>
+    {/* ========================================================
+          AI COMPLETE VIDEO NOTES
+      ======================================================== */}
+
+      {canManage &&
+      video.status === "completed" &&
+      transcript?.status === "completed" ? (
+        <section className="card mt-6 p-6">
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">
+                AI Study Notes
+              </p>
+
+              <h2 className="mt-1 text-xl">
+                Complete Video Notes
+              </h2>
+
+              <p className="mt-2 text-sm text-sand/60">
+                Generates structured study notes using the
+                transcript and visual information detected
+                from the video.
+              </p>
+            </div>
+
+            <StatusBadge
+              status={
+                notesLoading
+                  ? "processing"
+                  : notes
+                  ? "completed"
+                  : "not_started"
+              }
+            />
+
+          </div>
+
+          <button
+            type="button"
+            className="btn-primary mt-5"
+            onClick={generateNotes}
+            disabled={notesLoading}
+          >
+            {notesLoading
+              ? "Generating Notes..."
+              : notes
+              ? "Regenerate Notes"
+              : "Generate Notes"}
+          </button>
+
+          {notesLoading ? (
+            <p className="mt-4 text-sm text-sand/60">
+              Analyzing the transcript and visual context
+              from the video. This may take a little time.
+            </p>
+          ) : null}
+
+          {notes ? (
+            <div className="mt-6 border-t border-white/10 pt-6">
+
+              <h3 className="text-lg font-medium text-ember">
+                Study Notes
+              </h3>
+
+<div className="mt-4 text-sm leading-7 text-sand/80">
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    components={{
+      h1: ({ children }) => (
+        <h1 className="mb-5 mt-8 text-2xl font-bold text-sand first:mt-0">
+          {children}
+        </h1>
+      ),
+
+      h2: ({ children }) => (
+        <h2 className="mb-4 mt-7 text-xl font-semibold text-sand">
+          {children}
+        </h2>
+      ),
+
+      h3: ({ children }) => (
+        <h3 className="mb-3 mt-5 text-lg font-semibold text-ember">
+          {children}
+        </h3>
+      ),
+
+      p: ({ children }) => (
+        <p className="mb-4 leading-7 text-sand/80">
+          {children}
+        </p>
+      ),
+
+      ul: ({ children }) => (
+        <ul className="mb-5 ml-6 list-disc space-y-2">
+          {children}
+        </ul>
+      ),
+
+      ol: ({ children }) => (
+        <ol className="mb-5 ml-6 list-decimal space-y-2">
+          {children}
+        </ol>
+      ),
+
+      li: ({ children }) => (
+        <li className="pl-1 leading-7">
+          {children}
+        </li>
+      ),
+
+      strong: ({ children }) => (
+        <strong className="font-semibold text-sand">
+          {children}
+        </strong>
+      ),
+
+      table: ({ children }) => (
+        <div className="my-6 overflow-x-auto rounded-xl border border-white/10">
+          <table className="w-full border-collapse text-sm">
+            {children}
+          </table>
+        </div>
+      ),
+
+      thead: ({ children }) => (
+        <thead className="bg-white/5">
+          {children}
+        </thead>
+      ),
+
+      th: ({ children }) => (
+        <th className="border border-white/10 px-4 py-3 text-left font-semibold text-sand">
+          {children}
+        </th>
+      ),
+
+      td: ({ children }) => (
+        <td className="border border-white/10 px-4 py-3 align-top text-sand/80">
+          {children}
+        </td>
+      ),
+
+      blockquote: ({ children }) => (
+        <blockquote className="my-5 border-l-4 border-moss pl-4 text-sand/70">
+          {children}
+        </blockquote>
+      ),
+
+      code: ({ children }) => (
+        <code className="rounded bg-white/10 px-1.5 py-0.5 text-sm text-ember">
+          {children}
+        </code>
+      ),
+    }}
+  >
+    {notes.replace(/^\\(?=#+\s)/gm, "")}
+  </ReactMarkdown>
+</div>
+
+            </div>
+          ) : null}
+
+        </section>
+      ) : null}
+
+</AppShell>
   );
 }
 

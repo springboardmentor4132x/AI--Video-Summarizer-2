@@ -8,7 +8,7 @@ Entities:
 - Video: Metadata for videos uploaded by users for processing.
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -54,6 +54,19 @@ class Video(Base):
     status = Column(String(50), nullable=False, default="uploaded")  # e.g., uploaded, processing, completed, failed
     summary = Column(String, nullable=True)
     transcript = Column(String, nullable=True)
+
+    # AI-generated detailed study notes
+    notes = Column(
+        String,
+        nullable=True,
+    )
+
+    # Stored visual context used for AI-generated study notes.
+    # Contains OCR and VLM/visual understanding information.
+    visual_context = Column(
+        JSON,
+        nullable=True,
+    )
     duration = Column(Integer, nullable=True)       # Video duration in seconds (extracted via FFprobe)
     width = Column(Integer, nullable=True)           # Video width in pixels
     height = Column(Integer, nullable=True)          # Video height in pixels

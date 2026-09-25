@@ -29,6 +29,9 @@ from app.models import Video, User
 from app.auth import get_current_user
 
 
+from app.services.notes_service import generate_video_notes
+
+
 router = APIRouter(
     prefix="/videos",
     tags=["Videos"]
@@ -393,6 +396,195 @@ def process_analysis_compat(
 ):
     """Triggers background analysis when 'Rerun analysis' button is clicked."""
     return process_video_compat(video_id, background_tasks, db, current_user)
+
+# NOTES
+# ============================================================
+
+@router.post("/{video_id}/notes")
+def generate_video_notes_api(
+    video_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate detailed study notes using:
+
+    - Whisper transcript
+    - OCR information
+    - VLM visual understanding
+
+    The generated notes are stored in PostgreSQL.
+    """
+
+    video = (
+        db.query(Video)
+        .filter(
+            Video.id == video_id,
+            Video.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found",
+        )
+
+    if video.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Video processing is not completed yet.",
+        )
+
+    if not video.transcript:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transcript is not available for this video.",
+        )
+
+    try:
+
+        visual_context = video.visual_context or []
+
+        print(
+            f"[Notes API] Generating notes for "
+            f"Video {video_id}..."
+        )
+
+        print(
+            f"[Notes API] Visual context items available: "
+            f"{len(visual_context)}"
+        )
+
+        notes_result = generate_video_notes(
+            transcript=video.transcript,
+            visual_context=visual_context,
+        )
+
+        # ----------------------------------------------------
+        # Support dictionary and string return values
+        # ----------------------------------------------------
+
+        if isinstance(notes_result, dict):
+
+            generated_notes = notes_result.get(
+                "notes",
+                "",
+            )
+
+            sections_generated = notes_result.get(
+                "sections_generated",
+                0,
+            )
+
+            visuals_used = notes_result.get(
+                "visuals_used",
+                len(visual_context),
+            )
+
+        else:
+
+            generated_notes = str(
+                notes_result
+            )
+
+            sections_generated = 0
+
+            visuals_used = len(
+                visual_context
+            )
+
+        if not generated_notes.strip():
+            raise ValueError(
+                "Notes service returned empty notes."
+            )
+
+        # ----------------------------------------------------
+        # Save notes
+        # ----------------------------------------------------
+
+        video.notes = generated_notes
+
+        db.commit()
+        db.refresh(video)
+
+        print(
+            f"[Notes API] Notes generated successfully "
+            f"for Video {video_id}"
+        )
+
+        return {
+            "video_id": video.id,
+            "status": "completed",
+            "notes": video.notes,
+            "sections_generated": sections_generated,
+            "visuals_used": visuals_used,
+            "visual_context_items": len(
+                visual_context
+            ),
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+
+        db.rollback()
+
+        print(
+            f"[Notes API Error] "
+            f"Video {video_id}: {e}"
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Notes generation failed: {str(e)}",
+        )
+
+
+# ============================================================
+# GET SAVED NOTES
+# ============================================================
+
+@router.get("/{video_id}/notes")
+def get_video_notes_api(
+    video_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return previously generated study notes.
+    """
+
+    video = (
+        db.query(Video)
+        .filter(
+            Video.id == video_id,
+            Video.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found",
+        )
+
+    return {
+        "video_id": video.id,
+        "status": (
+            "completed"
+            if video.notes
+            else "not_generated"
+        ),
+        "notes": video.notes,
+    }
+
+
+# ============================================================
+
 
 @router.get("/{video_id}/jobs")
 def get_video_jobs_compat(video_id: int, db: Session = Depends(get_db)):
