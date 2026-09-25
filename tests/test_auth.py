@@ -62,7 +62,7 @@ def test_full_auth_flow():
     profile = res_me.json()
     assert profile["email"] == "admin@clipmind.ai"
     assert profile["role"] == "administrator"
-    print(f"Profile retrieved successfully: {profile['name']} ({profile['role']})")
+    print(f"Profile retrieved successfully: {profile['full_name']} ({profile['role']})")
 
     # 5. Test RBAC: Admin check with Admin Token (Should succeed)
     res_admin_check = client.get("/auth/admin-check", headers=headers)

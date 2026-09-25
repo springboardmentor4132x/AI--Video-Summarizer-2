@@ -8,7 +8,7 @@ Entities:
 - Video: Metadata for videos uploaded by users for processing.
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -52,8 +52,9 @@ class Video(Base):
     file_path = Column(String(500), nullable=False)
     file_type = Column(String(50), nullable=True)  # e.g., mp4, webm, mov, mkv
     status = Column(String(50), nullable=False, default="uploaded")  # e.g., uploaded, processing, completed, failed
-    summary = Column(String, nullable=True)
-    transcript = Column(String, nullable=True)
+    summary = Column(Text, nullable=True)
+    transcript = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)      # Stores error details when status == 'failed'
     duration = Column(Integer, nullable=True)       # Video duration in seconds (extracted via FFprobe)
     width = Column(Integer, nullable=True)           # Video width in pixels
     height = Column(Integer, nullable=True)          # Video height in pixels

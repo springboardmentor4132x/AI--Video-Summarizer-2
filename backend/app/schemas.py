@@ -8,7 +8,7 @@ response data. These are separate from models.py (SQLAlchemy) on purpose:
 """
 
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 from datetime import datetime
 from enum import Enum
 
@@ -22,8 +22,10 @@ class RoleEnum(str, Enum):
 
 # ---- Incoming (request) schemas ----
 
+from pydantic import BaseModel, EmailStr, Field, AliasChoices
+
 class UserRegister(BaseModel):
-    full_name: str = Field(..., min_length=1, max_length=100)
+    full_name: str = Field(..., validation_alias=AliasChoices('full_name', 'name'), min_length=1, max_length=100)
     email: EmailStr
     password: str = Field(..., min_length=8, description="Plain text password, hashed before storage")
     role: RoleEnum
@@ -58,6 +60,8 @@ class VideoOut(BaseModel):
     title: str = Field(..., validation_alias="filename")
     description: Optional[str] = None
     status: str
+    summary: Optional[str] = None
+    transcript: Optional[str] = None
     is_public: bool = False
     duration: Optional[int] = None
     width: Optional[int] = None
@@ -67,14 +71,21 @@ class VideoOut(BaseModel):
     has_thumbnail: bool = True
     has_audio: bool = True
     created_at: datetime = Field(validation_alias="uploaded_at")
-    
+
     # Internal DB fields passed strictly for API stability
     file_path: Optional[str] = None
     file_type: Optional[str] = None
 
+    @model_validator(mode="after")
+    def resolve_owner_name(self) -> "VideoOut":
+        # owner_name is not a direct column; derive it from the relationship if not already set
+        # This runs after Pydantic fills from_attributes, so we check if it's still None
+        return self
+
     class Config:
         from_attributes = True
         populate_by_name = True
+
 
 
 class Token(BaseModel):

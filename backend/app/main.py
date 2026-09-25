@@ -11,14 +11,36 @@ Other teammates will later add their own routers here too, e.g.:
     app.include_router(video_routes.router)
 """
 
+import os
+# Fix OpenBLAS thread allocation failure in multi-threaded Python/FastAPI environment
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["OPENBLAS_MAIN_FREE"] = "1"
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import engine, Base
+from app.database import engine, Base, SessionLocal
 from app.routes import auth_routes, video_routes
+from app.models import Video
 
 # Create database tables automatically if they do not exist
 Base.metadata.create_all(bind=engine)
+
+# Reset videos stuck in 'processing' state due to past backend restarts/crashes
+db_startup = SessionLocal()
+try:
+    stuck_videos = db_startup.query(Video).filter(Video.status == "processing").all()
+    if stuck_videos:
+        print(f"[Startup] Found {len(stuck_videos)} video(s) stuck in processing status. Resetting to 'uploaded'.")
+        for v in stuck_videos:
+            v.status = "uploaded"
+        db_startup.commit()
+finally:
+    db_startup.close()
 
 app = FastAPI(
     title="ClipMind AI - Backend",
