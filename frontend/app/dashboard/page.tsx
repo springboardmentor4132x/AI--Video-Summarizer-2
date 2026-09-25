@@ -132,7 +132,7 @@ export default function DashboardPage() {
         <StatCard
           label="Summaries Generated"
           value={metrics.summaries_generated}
-          subtext="Local DistilBART LLM"
+          subtext="Extractive NLP (TF-IDF)"
           icon="✨"
           accent="from-purple-500/20 to-purple-500/5 text-purple-400 border-purple-500/20"
         />
