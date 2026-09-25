@@ -266,33 +266,35 @@ export default function VideoDetailPage() {
         </div>
       </section>
 
-      <section className="card mt-6 p-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-widest text-moss">Self Assessment</p>
-            <h2 className="mt-1 text-xl">Learning Questions</h2>
+      {user?.role === "learner" && (
+        <section className="card mt-6 p-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">Self Assessment</p>
+              <h2 className="mt-1 text-xl">Learning Questions</h2>
+            </div>
+            <span className="text-xs text-sand/50">{analysis.questions.length}</span>
           </div>
-          <span className="text-xs text-sand/50">{analysis.questions.length}</span>
-        </div>
-        {analysis.questions.length ? (
-          <ol className="mt-5 space-y-4">
-            {analysis.questions.map((item) => (
-              <li key={item.id} className="border-b border-white/10 pb-4 last:border-0">
-                <div className="flex w-full items-start gap-4">
-                  <span className="mt-1 font-mono text-xs text-moss">Q.</span>
-                  <div className="flex-1">
-                    <span className="text-sm font-medium leading-6">{item.question}</span>
-                    <p className="mt-1 text-xs text-sand/60">Hint: {item.hint}</p>
+          {analysis.questions.length ? (
+            <ol className="mt-5 space-y-4">
+              {analysis.questions.map((item) => (
+                <li key={item.id} className="border-b border-white/10 pb-4 last:border-0">
+                  <div className="flex w-full items-start gap-4">
+                    <span className="mt-1 font-mono text-xs text-moss">Q.</span>
+                    <div className="flex-1">
+                      <span className="text-sm font-medium leading-6">{item.question}</span>
+                      <p className="mt-1 text-xs text-sand/60">Hint: {item.hint}</p>
+                    </div>
+                    <button className="btn-ghost text-xs whitespace-nowrap" onClick={() => seekTo(item.start_sec)}>Review at {formatTime(item.start_sec)}</button>
                   </div>
-                  <button className="btn-ghost text-xs whitespace-nowrap" onClick={() => seekTo(item.start_sec)}>Review at {formatTime(item.start_sec)}</button>
-                </div>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="mt-5 text-sm text-sand/50">Questions will appear after transcript analysis.</p>
-        )}
-      </section>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="mt-5 text-sm text-sand/50">Questions will appear after transcript analysis.</p>
+          )}
+        </section>
+      )}
 
     </AppShell>
   );
