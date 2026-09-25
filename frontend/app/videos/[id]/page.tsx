@@ -13,7 +13,7 @@ export default function VideoDetailPage() {
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [transcript, setTranscript] = useState<TranscriptItem | null>(null);
   const [summary, setSummary] = useState<SummaryItem | null>(null);
-  const [analysis, setAnalysis] = useState<AnalysisItem>({ topics: [], key_moments: [] });
+  const [analysis, setAnalysis] = useState<AnalysisItem>({ topics: [], key_moments: [], questions: [] });
   const [editing, setEditing] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
   const [error, setError] = useState("");
@@ -264,6 +264,34 @@ export default function VideoDetailPage() {
           <div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-widest text-moss">Key moments</p><h2 className="mt-1 text-xl">Useful highlights</h2></div>{canManage && transcript?.status === "completed" ? <button className="btn-ghost text-xs" onClick={rerunAnalysis} disabled={busy}>Rerun</button> : null}</div>
           {analysis.key_moments.length ? <ul className="mt-5 space-y-2">{analysis.key_moments.map((moment) => <li key={moment.id}><button className="w-full border-b border-white/10 py-3 text-left hover:text-ember" onClick={() => seekTo(moment.start_sec)}><div className="flex items-center justify-between gap-3"><span className="font-mono text-xs text-moss">{formatTime(moment.start_sec)}</span><span className="text-xs text-sand/50">{moment.score?.toFixed(2)}</span></div><p className="mt-1 line-clamp-2 text-sm text-sand/80">{moment.transcript_text || moment.title}</p></button></li>)}</ul> : <p className="mt-5 text-sm text-sand/50">No highlights detected yet.</p>}
         </div>
+      </section>
+
+      <section className="card mt-6 p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-moss">Self Assessment</p>
+            <h2 className="mt-1 text-xl">Learning Questions</h2>
+          </div>
+          <span className="text-xs text-sand/50">{analysis.questions.length}</span>
+        </div>
+        {analysis.questions.length ? (
+          <ol className="mt-5 space-y-4">
+            {analysis.questions.map((item) => (
+              <li key={item.id} className="border-b border-white/10 pb-4 last:border-0">
+                <div className="flex w-full items-start gap-4">
+                  <span className="mt-1 font-mono text-xs text-moss">Q.</span>
+                  <div className="flex-1">
+                    <span className="text-sm font-medium leading-6">{item.question}</span>
+                    <p className="mt-1 text-xs text-sand/60">Hint: {item.hint}</p>
+                  </div>
+                  <button className="btn-ghost text-xs whitespace-nowrap" onClick={() => seekTo(item.start_sec)}>Review at {formatTime(item.start_sec)}</button>
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="mt-5 text-sm text-sand/50">Questions will appear after transcript analysis.</p>
+        )}
       </section>
 
     </AppShell>

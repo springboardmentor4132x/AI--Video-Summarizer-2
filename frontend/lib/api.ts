@@ -56,7 +56,8 @@ export type SummaryItem = {
 };
 export type TopicItem = { id: string; video_id: string; start_sec: number; end_sec: number; title: string; transcript_text: string; created_at: string };
 export type KeyMomentItem = { id: string; video_id: string; topic_id: string | null; start_sec: number; end_sec: number; title: string; transcript_text: string | null; score: number | null; moment_type: string; created_at: string };
-export type AnalysisItem = { topics: TopicItem[]; key_moments: KeyMomentItem[] };
+export type LearningQuestionItem = { id: string; video_id: string; topic_id: string | null; start_sec: number; end_sec: number; question: string; hint: string; score: number | null; created_at: string };
+export type AnalysisItem = { topics: TopicItem[]; key_moments: KeyMomentItem[]; questions: LearningQuestionItem[] };
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;

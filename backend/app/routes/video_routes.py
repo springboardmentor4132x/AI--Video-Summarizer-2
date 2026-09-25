@@ -476,11 +476,14 @@ def get_video_transcript_compat(video_id: int, db: Session = Depends(get_db)):
         "updated_at": str(video.uploaded_at)
     }
 
+from app.services.scoring_service import score_segments
+from app.services.learning_questions import generate_questions_for_chunks
+
 @router.get("/{video_id}/analysis")
 def get_video_analysis_compat(video_id: int, db: Session = Depends(get_db)):
     """
     Returns real key moments and topics extracted from TranscriptChunk data.
-    Topics = chunked transcript sections. Key moments = highest-importance chunks.
+    Now enriched with Sanjana's ML scores and Utkarsh's generated learning questions!
     """
     chunks = (
         db.query(TranscriptChunk)
@@ -490,18 +493,24 @@ def get_video_analysis_compat(video_id: int, db: Session = Depends(get_db)):
     )
 
     if not chunks:
-        return {"topics": [], "key_moments": []}
+        return {"topics": [], "key_moments": [], "questions": []}
+        
+    chunk_texts = [c.chunk_text for c in chunks]
+    # Sanjana's ML scoring service
+    scores = score_segments(chunk_texts) if chunk_texts else []
 
-    # Build Topics from chunks — each chunk becomes a topic with an estimated timestamp
+    # Build Topics from chunks
     topics = []
-    for chunk in chunks:
-        # Estimate time: assume ~130 words per minute average speech rate
+    for i, chunk in enumerate(chunks):
         words_before = sum(len(c.chunk_text.split()) for c in chunks if c.chunk_index < chunk.chunk_index)
         start_sec = round((words_before / 130) * 60)
         end_sec = round(((words_before + len(chunk.chunk_text.split())) / 130) * 60)
         
-        # Use first sentence as the topic title
         first_sentence = chunk.chunk_text.split(".")[0].strip()[:80]
+        
+        # Attach Sanjana's scores safely
+        importance_score = scores[i].get("importance_score", 0.0) if i < len(scores) else 0.0
+        
         topics.append({
             "id": str(chunk.id),
             "video_id": str(video_id),
@@ -509,34 +518,33 @@ def get_video_analysis_compat(video_id: int, db: Session = Depends(get_db)):
             "end_sec": end_sec,
             "title": first_sentence if first_sentence else f"Section {chunk.chunk_index + 1}",
             "transcript_text": chunk.chunk_text[:200],
+            "importance_score": importance_score,
             "created_at": str(chunk.created_at)
         })
 
-    # Build Key Moments — pick the top 5 most "important" chunks by length (richest content)
-    sorted_by_importance = sorted(chunks, key=lambda c: len(c.chunk_text), reverse=True)
+    # Build Key Moments — pick the top 5 most "important" chunks based on Sanjana's scoring
+    sorted_by_importance = sorted(topics, key=lambda c: c.get("importance_score", 0), reverse=True)
     top_chunks = sorted_by_importance[:5]
 
     key_moments = []
     for i, chunk in enumerate(top_chunks):
-        words_before = sum(len(c.chunk_text.split()) for c in chunks if c.chunk_index < chunk.chunk_index)
-        start_sec = round((words_before / 130) * 60)
-        end_sec = round(((words_before + len(chunk.chunk_text.split())) / 130) * 60)
-        
-        highlight_sentence = chunk.chunk_text.split(".")[0].strip()[:80]
         key_moments.append({
-            "id": f"km-{chunk.id}",
-            "video_id": str(video_id),
-            "topic_id": str(chunk.id),
-            "start_sec": start_sec,
-            "end_sec": end_sec,
-            "title": highlight_sentence or f"Highlight {i + 1}",
-            "transcript_text": chunk.chunk_text[:300],
-            "score": round(len(chunk.chunk_text) / max(len(c.chunk_text) for c in chunks), 2),
-            "moment_type": "highlight",
-            "created_at": str(chunk.created_at)
+            "id": chunk["id"],
+            "video_id": chunk["video_id"],
+            "topic_id": chunk["id"],
+            "start_sec": chunk["start_sec"],
+            "end_sec": chunk["end_sec"],
+            "title": chunk["title"],
+            "transcript_text": chunk["transcript_text"],
+            "score": chunk.get("importance_score", 0.0),
+            "moment_type": "high_importance",
+            "created_at": chunk["created_at"]
         })
+        
+    # Utkarsh's Learning Questions generated from key moments
+    questions = generate_questions_for_chunks(key_moments)
 
-    return {"topics": topics, "key_moments": key_moments}
+    return {"topics": topics, "key_moments": key_moments, "questions": questions}
 
 
 @router.get("/{video_id}/stream")
