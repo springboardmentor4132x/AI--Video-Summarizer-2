@@ -11,7 +11,7 @@ export type User = {
   is_active: boolean;
 };
 
-export type VideoStatus = "uploaded" | "processing" | "ready" | "failed";
+export type VideoStatus = "uploaded" | "processing" | "ready" | "completed" | "failed";
 
 export type VideoItem = {
   id: string;
@@ -56,7 +56,8 @@ export type SummaryItem = {
 };
 export type TopicItem = { id: string; video_id: string; start_sec: number; end_sec: number; title: string; transcript_text: string; created_at: string };
 export type KeyMomentItem = { id: string; video_id: string; topic_id: string | null; start_sec: number; end_sec: number; title: string; transcript_text: string | null; score: number | null; moment_type: string; created_at: string };
-export type AnalysisItem = { topics: TopicItem[]; key_moments: KeyMomentItem[] };
+export type LearningQuestionItem = { id: string; video_id: string; topic_id: string | null; start_sec: number; end_sec: number; question: string; hint: string; score: number | null; created_at: string };
+export type AnalysisItem = { topics: TopicItem[]; key_moments: KeyMomentItem[]; questions: LearningQuestionItem[] };
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -80,6 +81,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) {
+    if (res.status === 401) {
+      clearToken();
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+    }
     let detail = `Request failed (${res.status})`;
     try {
       const data = await res.json();
@@ -118,6 +125,7 @@ export const api = {
   generateSummary: (id: string) => request<JobItem>(`/videos/${id}/summary`, { method: "POST" }),
   analysis: (id: string) => request<AnalysisItem>(`/videos/${id}/analysis`),
   rerunAnalysis: (id: string) => request<JobItem>(`/videos/${id}/analysis`, { method: "POST" }),
+  translate: (id: string, target_lang: string) => request<{lang: string, translated_summary: string, translated_transcript: string}>(`/videos/${id}/translate`, { method: "POST", body: JSON.stringify({ target_lang }) }),
   analytics: (days: number = 7) => request<AnalyticsDashboardData>(`/analytics/dashboard?days=${days}`),
   health: () => request<{ status: string }>("/health"),
 };

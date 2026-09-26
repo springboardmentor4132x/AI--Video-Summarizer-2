@@ -15,20 +15,25 @@ export default function VideoDetailPage() {
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [transcript, setTranscript] = useState<TranscriptItem | null>(null);
   const [summary, setSummary] = useState<SummaryItem | null>(null);
-  const [analysis, setAnalysis] = useState<AnalysisItem>({ topics: [], key_moments: [] });
-  const [notes, setNotes] = useState("");
-  const [notesLoading, setNotesLoading] = useState(false);
-
+  const [analysis, setAnalysis] = useState<AnalysisItem>({ topics: [], key_moments: [], questions: [] });
   const [editing, setEditing] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
+    const [notes, setNotes] = useState("");
+  const [notesLoading, setNotesLoading] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const playerRef = useRef<HTMLVideoElement>(null);
   // Sanjana's Semantic Search state
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<{chunk_index:number; text:string; similarity:number; importance_score:number}[]>([]);
+  const [searchResults, setSearchResults] = useState<{chunk_index:number; text:string; similarity:number; importance_score:number; start_sec:number}[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
+
+  // Offline Multilingual Translation
+  const [translating, setTranslating] = useState(false);
+  const [targetLang, setTargetLang] = useState("hin_Deva");
+  const [translatedSummary, setTranslatedSummary] = useState("");
+  const [translatedTranscript, setTranslatedTranscript] = useState("");
 
   const load = useCallback(async () => {
     const [v, j, t, s, a] = await Promise.all([api.video(params.id), api.jobs(params.id), api.transcript(params.id), api.summary(params.id), api.analysis(params.id)]);
@@ -53,34 +58,7 @@ export default function VideoDetailPage() {
     return () => clearInterval(timer);
   }, [jobs, video?.status, load]);
 
-  async function processNow() {
-    setBusy(true);
-    setError("");
-    try {
-      await api.processVideo(params.id);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start processing");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveTranscript() {
-    setBusy(true);
-    try { setTranscript(await api.updateTranscript(params.id, transcriptText)); setEditing(false); }
-    catch (err) { setError(err instanceof Error ? err.message : "Could not save transcript"); }
-    finally { setBusy(false); }
-  }
-
-  async function generateSummary() {
-    setBusy(true);
-    try { await api.generateSummary(params.id); await load(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Could not start summary"); }
-    finally { setBusy(false); }
-  }
-
-  useEffect(() => {
+    useEffect(() => {
     const token = localStorage.getItem("clipmind_token");
 
     if (!token) {
@@ -165,6 +143,33 @@ export default function VideoDetailPage() {
     }
   }
 
+  async function processNow() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.processVideo(params.id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start processing");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveTranscript() {
+    setBusy(true);
+    try { setTranscript(await api.updateTranscript(params.id, transcriptText)); setEditing(false); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not save transcript"); }
+    finally { setBusy(false); }
+  }
+
+  async function generateSummary() {
+    setBusy(true);
+    try { await api.generateSummary(params.id); await load(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not start summary"); }
+    finally { setBusy(false); }
+  }
+
   async function rerunAnalysis() {
     setBusy(true);
     try { await api.rerunAnalysis(params.id); await load(); }
@@ -176,6 +181,22 @@ export default function VideoDetailPage() {
     if (playerRef.current) {
       playerRef.current.currentTime = seconds;
       void playerRef.current.play();
+    }
+  }
+
+  async function runTranslation() {
+    setTranslating(true);
+    setError("");
+    setTranslatedSummary("");
+    setTranslatedTranscript("");
+    try {
+      const res = await api.translate(params.id, targetLang);
+      setTranslatedSummary(res.translated_summary || "");
+      setTranslatedTranscript(res.translated_transcript || "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Translation failed.");
+    } finally {
+      setTranslating(false);
     }
   }
 
@@ -237,14 +258,51 @@ export default function VideoDetailPage() {
       {video.error_message ? <p className="mt-4 text-sm text-red-300">{video.error_message}</p> : null}
       {error ? <p className="mt-4 text-sm text-red-300">{error}</p> : null}
 
+      <section className="card mt-6 p-6">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs uppercase tracking-widest text-moss">Semantic QA</p>
+          <h2 className="text-xl">Ask a question about this video</h2>
+          <div className="mt-3 flex items-center gap-3">
+            <input 
+              type="text" 
+              className="input flex-1" 
+              placeholder="e.g. How do we calculate the derivative?" 
+              value={searchQuery} 
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && runSearch()}
+              disabled={searching}
+            />
+            <button className="btn-primary" onClick={runSearch} disabled={searching || !searchQuery.trim()}>
+              {searching ? "Searching..." : "Ask Question"}
+            </button>
+          </div>
+          {searchError && <p className="text-sm text-red-400 mt-2">{searchError}</p>}
+          
+          {searchResults.length > 0 && (
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <h3 className="font-medium text-ember mb-3">Top Answer found</h3>
+              <div className="bg-white/5 p-4 rounded-lg flex items-start gap-4">
+                <div className="flex-1">
+                  <p className="text-sm text-sand/90">"{searchResults[0].text}"</p>
+                  <p className="text-xs font-mono text-moss mt-2">Similarity Match: {(searchResults[0].similarity * 100).toFixed(1)}%</p>
+                </div>
+                <button className="btn-ghost flex-shrink-0" onClick={() => seekTo(searchResults[0].start_sec)}>
+                  Jump to {formatTime(searchResults[0].start_sec)}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
       {canManage ? (
         <div className="card mt-8 p-6">
           <h2 className="text-lg font-medium">FFmpeg pipeline</h2>
           <p className="mt-1 text-sm text-sand/60">
             Extracts audio and a thumbnail, then generates a timestamped transcript for analysis.
           </p>
-          <button className="btn-primary mt-4" onClick={processNow} disabled={busy || video.status === "processing"}>
-            {busy || video.status === "processing" ? "Processing…" : "Run processing"}
+          <button className="btn-primary mt-4" onClick={processNow} disabled={busy}>
+            {busy ? "Starting processing…" : video.status === "processing" ? "Re-run processing" : "Run processing"}
           </button>
           {latest ? (
             <div className="mt-4">
@@ -281,6 +339,48 @@ export default function VideoDetailPage() {
         {canManage ? <button className="btn-primary mt-5" onClick={generateSummary} disabled={busy || summary?.status === "processing" || transcript?.status !== "completed"}>{summary?.status === "completed" ? "Regenerate summary" : "Generate summary"}</button> : null}
       </section>
 
+      {summary?.status === "completed" && (
+        <section className="card mt-6 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">Multilingual</p>
+              <h2 className="mt-1 text-xl">Offline Translation (Meta NLLB-200)</h2>
+            </div>
+            <StatusBadge status={translatedSummary ? "completed" : "not_started"} />
+          </div>
+          
+          <div className="mt-5 flex items-center gap-4">
+            <select 
+              className="input max-w-xs" 
+              value={targetLang} 
+              onChange={e => setTargetLang(e.target.value)}
+              disabled={translating}
+            >
+              <option value="hin_Deva">Hindi (हिन्दी)</option>
+              <option value="ara_Arab">Arabic (العربية)</option>
+              <option value="fra_Latn">French (Français)</option>
+              <option value="spa_Latn">Spanish (Español)</option>
+              <option value="deu_Latn">German (Deutsch)</option>
+            </select>
+            <button className="btn-primary" onClick={runTranslation} disabled={translating}>
+              {translating ? "Translating natively..." : "Translate Content"}
+            </button>
+          </div>
+
+          {translating && <p className="mt-5 text-sm text-sand/60 animate-pulse">Running Meta NLLB model locally. This uses heavy CPU and may take 1-2 minutes for large transcripts...</p>}
+
+          {!translating && translatedSummary && (
+            <div className="mt-5 border-t border-white/10 pt-5">
+              <h3 className="font-medium text-ember">Translated Summary</h3>
+              <p className="mt-2 text-sm leading-7 text-sand/80">{translatedSummary}</p>
+              
+              <h3 className="mt-6 font-medium text-ember">Translated Transcript</h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-sand/80">{translatedTranscript}</p>
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="mt-6 grid gap-6 lg:grid-cols-2">
         <div className="card p-6">
           <div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-widest text-moss">Topics</p><h2 className="mt-1 text-xl">Detected topics</h2></div><span className="text-xs text-sand/50">{analysis.topics.length}</span></div>
@@ -292,13 +392,41 @@ export default function VideoDetailPage() {
         </div>
       </section>
 
-    {/* ========================================================
+      {user?.role === "learner" && (
+        <section className="card mt-6 p-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">Self Assessment</p>
+              <h2 className="mt-1 text-xl">Learning Questions</h2>
+            </div>
+            <span className="text-xs text-sand/50">{analysis.questions.length}</span>
+          </div>
+          {analysis.questions.length ? (
+            <ol className="mt-5 space-y-4">
+              {analysis.questions.map((item) => (
+                <li key={item.id} className="border-b border-white/10 pb-4 last:border-0">
+                  <div className="flex w-full items-start gap-4">
+                    <span className="mt-1 font-mono text-xs text-moss">Q.</span>
+                    <div className="flex-1">
+                      <span className="text-sm font-medium leading-6">{item.question}</span>
+                      <p className="mt-1 text-xs text-sand/60">Hint: {item.hint}</p>
+                    </div>
+                    <button className="btn-ghost text-xs whitespace-nowrap" onClick={() => seekTo(item.start_sec)}>Review at {formatTime(item.start_sec)}</button>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="mt-5 text-sm text-sand/50">Questions will appear after transcript analysis.</p>
+          )}
+        </section>
+      )}
+
+        {/* ========================================================
           AI COMPLETE VIDEO NOTES
       ======================================================== */}
 
-      {canManage &&
-      video.status === "completed" &&
-      transcript?.status === "completed" ? (
+      {video.status === "completed" && transcript?.status === "completed" ? (
         <section className="card mt-6 p-6">
 
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -331,18 +459,22 @@ export default function VideoDetailPage() {
 
           </div>
 
-          <button
-            type="button"
-            className="btn-primary mt-5"
-            onClick={generateNotes}
-            disabled={notesLoading}
-          >
-            {notesLoading
-              ? "Generating Notes..."
-              : notes
-              ? "Regenerate Notes"
-              : "Generate Notes"}
-          </button>
+          {canManage ? (
+            <button
+              type="button"
+              className="btn-primary mt-5"
+              onClick={generateNotes}
+              disabled={notesLoading}
+            >
+              {notesLoading
+                ? "Generating Notes..."
+                : notes
+                ? "Regenerate Notes"
+                : "Generate Notes"}
+            </button>
+          ) : notes ? null : (
+            <p className="mt-5 text-sm text-sand/50">Your educator hasn't generated study notes for this video yet.</p>
+          )}
 
           {notesLoading ? (
             <p className="mt-4 text-sm text-sand/60">
@@ -458,6 +590,7 @@ export default function VideoDetailPage() {
 
         </section>
       ) : null}
+
 
 </AppShell>
   );

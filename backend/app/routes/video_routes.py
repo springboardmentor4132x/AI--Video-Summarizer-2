@@ -27,8 +27,6 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Video, User
 from app.auth import get_current_user
-
-
 from app.services.notes_service import generate_video_notes
 
 
@@ -199,8 +197,47 @@ def delete_video(
 from app.database import SessionLocal
 from app.services.ai_service import generate_video_summary
 from app.services.embedding_service import process_and_store_embeddings, search_transcript_similarity
+from app.services.translation_service import translate_text
 from app.models import TranscriptChunk
 from fastapi import BackgroundTasks
+from pydantic import BaseModel
+
+class TranslationRequest(BaseModel):
+    target_lang: str
+
+@router.post("/{video_id}/translate")
+def translate_video_content(
+    video_id: int,
+    req: TranslationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Translates the video transcript and summary into the target language on-demand.
+    Example langs: hin_Deva (Hindi), mar_Deva (Marathi)
+    """
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+        
+    if not video.summary and not video.transcript:
+        raise HTTPException(status_code=400, detail="Cannot translate empty content. Run AI pipeline first.")
+
+    target_lang = req.target_lang
+    try:
+        translated_summary = translate_text(video.summary, target_lang=target_lang) if video.summary else None
+        
+        # Transcript might be very long. The UI could pass options, but for now we'll translate it all.
+        translated_transcript = translate_text(video.transcript, target_lang=target_lang) if video.transcript else None
+        
+        return {
+            "lang": target_lang,
+            "translated_summary": translated_summary,
+            "translated_transcript": translated_transcript
+        }
+    except Exception as e:
+        print(f"[Translation API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Translation engine failed: {str(e)}")
 
 def extract_video_metadata(file_path: str):
     """Uses FFprobe to extract duration, width, height from the video file."""
@@ -259,13 +296,11 @@ def process_video_pipeline_background(video_id: int, file_path: str, filename: s
         bg_db.commit()
         print(f"[Worker] Metadata extracted: {meta.get('duration')}s, {meta.get('width')}x{meta.get('height')}, {video.file_size} bytes")
         
-        # 1. Run Heavy AI Transcript & Summary Module (Whisper & HF)
+        # 1. Run Heavy AI Transcript & Summary Module (Whisper & HF (or Extractive NLP fallback))
         summary_data = generate_video_summary(file_path, filename, file_type)
         
         video.summary = summary_data["summary"]
         video.transcript = summary_data.get("transcript", "Transcript unavailable.")
-        video.status = "completed"
-        bg_db.commit()
         
         # 2. Delete old chunks so fresh embeddings can be stored on regeneration
         bg_db.query(TranscriptChunk).filter(TranscriptChunk.video_id == video_id).delete()
@@ -273,6 +308,11 @@ def process_video_pipeline_background(video_id: int, file_path: str, filename: s
         
         # 3. Offload semantic chunking and native ARRAY(Float) embedding
         process_and_store_embeddings(video.transcript, video_id, user_id, bg_db)
+
+        # 4. NOW set status to completed so frontend sees everything at once
+        video.status = "completed"
+        bg_db.commit()
+        
         print(f"[Worker] Pipeline complete! Successfully finished processing Video {video_id}")
 
     except Exception as e:
@@ -280,6 +320,7 @@ def process_video_pipeline_background(video_id: int, file_path: str, filename: s
         video = bg_db.query(Video).filter(Video.id == video_id).first()
         if video:
             video.status = "failed"
+            video.error_message = str(e)
             bg_db.commit()
         print(f"[Worker] Fatal Background Processing Error: {e}")
     finally:
@@ -305,8 +346,8 @@ def get_video_summary(
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
 
-    # If it is not completed or processing yet, start processing in background
-    if video.status in ("uploaded", "failed"):
+    # If freshly uploaded, start processing in background
+    if video.status == "uploaded":
         video.status = "processing"
         db.commit()
         background_tasks.add_task(
@@ -397,8 +438,9 @@ def process_analysis_compat(
     """Triggers background analysis when 'Rerun analysis' button is clicked."""
     return process_video_compat(video_id, background_tasks, db, current_user)
 
+
 # NOTES
-# ============================================================
+# ====
 
 @router.post("/{video_id}/notes")
 def generate_video_notes_api(
@@ -543,9 +585,9 @@ def generate_video_notes_api(
         )
 
 
-# ============================================================
+# ====
 # GET SAVED NOTES
-# ============================================================
+# ====
 
 @router.get("/{video_id}/notes")
 def get_video_notes_api(
@@ -583,11 +625,11 @@ def get_video_notes_api(
     }
 
 
-# ============================================================
+# ====
 
 
 # NOTES
-# ============================================================
+# ====
 
 @router.post("/{video_id}/notes")
 def generate_video_notes_api(
@@ -732,9 +774,9 @@ def generate_video_notes_api(
         )
 
 
-# ============================================================
+# ====
 # GET SAVED NOTES
-# ============================================================
+# ====
 
 @router.get("/{video_id}/notes")
 def get_video_notes_api(
@@ -772,7 +814,7 @@ def get_video_notes_api(
     }
 
 
-# ============================================================
+# ====
 
 
 @router.get("/{video_id}/jobs")
@@ -814,11 +856,14 @@ def get_video_transcript_compat(video_id: int, db: Session = Depends(get_db)):
         "updated_at": str(video.uploaded_at)
     }
 
+from app.services.scoring_service import score_segments
+from app.services.learning_questions import generate_questions_for_chunks
+
 @router.get("/{video_id}/analysis")
 def get_video_analysis_compat(video_id: int, db: Session = Depends(get_db)):
     """
     Returns real key moments and topics extracted from TranscriptChunk data.
-    Topics = chunked transcript sections. Key moments = highest-importance chunks.
+    Now enriched with Sanjana's ML scores and Utkarsh's generated learning questions!
     """
     chunks = (
         db.query(TranscriptChunk)
@@ -828,18 +873,31 @@ def get_video_analysis_compat(video_id: int, db: Session = Depends(get_db)):
     )
 
     if not chunks:
-        return {"topics": [], "key_moments": []}
+        return {"topics": [], "key_moments": [], "questions": []}
+        
+    chunk_texts = [c.chunk_text for c in chunks]
+    # Sanjana's ML scoring service
+    scores = score_segments(chunk_texts) if chunk_texts else []
 
-    # Build Topics from chunks — each chunk becomes a topic with an estimated timestamp
+    # Build Topics from chunks
     topics = []
-    for chunk in chunks:
-        # Estimate time: assume ~130 words per minute average speech rate
+    for i, chunk in enumerate(chunks):
         words_before = sum(len(c.chunk_text.split()) for c in chunks if c.chunk_index < chunk.chunk_index)
         start_sec = round((words_before / 130) * 60)
         end_sec = round(((words_before + len(chunk.chunk_text.split())) / 130) * 60)
         
-        # Use first sentence as the topic title
-        first_sentence = chunk.chunk_text.split(".")[0].strip()[:80]
+        raw_sentence = chunk.chunk_text.split(".")[0].strip()
+        raw_sentence = raw_sentence.lstrip(", .;-")
+        if raw_sentence:
+            raw_sentence = raw_sentence[0].upper() + (raw_sentence[1:] if len(raw_sentence) > 1 else "")
+        
+        first_sentence = raw_sentence[:80]
+        if len(raw_sentence) > 80:
+            first_sentence += "..."
+        
+        # Attach Sanjana's scores safely
+        importance_score = scores[i].get("importance_score", 0.0) if i < len(scores) else 0.0
+        
         topics.append({
             "id": str(chunk.id),
             "video_id": str(video_id),
@@ -847,35 +905,76 @@ def get_video_analysis_compat(video_id: int, db: Session = Depends(get_db)):
             "end_sec": end_sec,
             "title": first_sentence if first_sentence else f"Section {chunk.chunk_index + 1}",
             "transcript_text": chunk.chunk_text[:200],
+            "importance_score": importance_score,
             "created_at": str(chunk.created_at)
         })
 
-    # Build Key Moments — pick the top 5 most "important" chunks by length (richest content)
-    sorted_by_importance = sorted(chunks, key=lambda c: len(c.chunk_text), reverse=True)
+    # Build Key Moments — pick the top 5 most "important" chunks based on Sanjana's scoring
+    sorted_by_importance = sorted(topics, key=lambda c: c.get("importance_score", 0), reverse=True)
     top_chunks = sorted_by_importance[:5]
 
     key_moments = []
     for i, chunk in enumerate(top_chunks):
-        words_before = sum(len(c.chunk_text.split()) for c in chunks if c.chunk_index < chunk.chunk_index)
-        start_sec = round((words_before / 130) * 60)
-        end_sec = round(((words_before + len(chunk.chunk_text.split())) / 130) * 60)
-        
-        highlight_sentence = chunk.chunk_text.split(".")[0].strip()[:80]
         key_moments.append({
-            "id": f"km-{chunk.id}",
-            "video_id": str(video_id),
-            "topic_id": str(chunk.id),
-            "start_sec": start_sec,
-            "end_sec": end_sec,
-            "title": highlight_sentence or f"Highlight {i + 1}",
-            "transcript_text": chunk.chunk_text[:300],
-            "score": round(len(chunk.chunk_text) / max(len(c.chunk_text) for c in chunks), 2),
-            "moment_type": "highlight",
-            "created_at": str(chunk.created_at)
+            "id": chunk["id"],
+            "video_id": chunk["video_id"],
+            "topic_id": chunk["id"],
+            "start_sec": chunk["start_sec"],
+            "end_sec": chunk["end_sec"],
+            "title": chunk["title"],
+            "transcript_text": chunk["transcript_text"],
+            "score": chunk.get("importance_score", 0.0),
+            "moment_type": "high_importance",
+            "created_at": chunk["created_at"]
         })
+        
+    # Utkarsh's Learning Questions generated from key moments
+    questions = generate_questions_for_chunks(key_moments)
 
-    return {"topics": topics, "key_moments": key_moments}
+    return {"topics": topics, "key_moments": key_moments, "questions": questions}
 
+
+@router.get("/{video_id}/search")
+def semantic_search_video(video_id: int, q: str, top_k: int = 5, db: Session = Depends(get_db)):
+    """
+    Personalized Q&A Video Search (Extractive).
+    Uses SentenceTransformer embeddings to find the most relevant chunk of transcript.
+    """
+    if not q or not q.strip():
+        return {"results": []}
+
+    chunks = db.query(TranscriptChunk).filter(TranscriptChunk.video_id == video_id).order_by(TranscriptChunk.chunk_index.asc()).all()
+    if not chunks:
+        return {"results": [], "message": "Video has no transcript yet."}
+
+    # Generate embeddings and similarities
+    chunk_texts = [c.chunk_text for c in chunks]
+    
+    # We can embed the query and transcript chunks to find the closest match.
+    from app.services.scoring_service import model
+    from sklearn.metrics.pairwise import cosine_similarity
+    
+    query_vector = model.encode([q], convert_to_numpy=True, normalize_embeddings=True)
+    chunk_vectors = model.encode(chunk_texts, convert_to_numpy=True, normalize_embeddings=True)
+    
+    similarities = cosine_similarity(query_vector, chunk_vectors)[0]
+    
+    results = []
+    for i, c in enumerate(chunks):
+        # Calculate start_sec approximation exactly like in key_moments
+        words_before = sum(len(chk.chunk_text.split()) for chk in chunks if chk.chunk_index < c.chunk_index)
+        start_sec = round((words_before / 130) * 60)
+        results.append({
+            "chunk_index": c.chunk_index,
+            "text": c.chunk_text,
+            "similarity": float(similarities[i]),
+            "importance_score": float(similarities[i]), # For UI compatibility
+            "start_sec": start_sec
+        })
+        
+    # Sort by highest similarity
+    results = sorted(results, key=lambda x: x["similarity"], reverse=True)[:top_k]
+    return {"results": results}
 
 @router.get("/{video_id}/stream")
 def stream_video(video_id: int, db: Session = Depends(get_db)):
@@ -1084,7 +1183,7 @@ def get_analytics_dashboard(
             "title": v.filename,
             "status": v.status,
             "uploaded_at": v.uploaded_at.strftime("%b %d, %H:%M") if v.uploaded_at else "Recently",
-            "owner_name": v.owner.name if v.owner else "Creator",
+            "owner_name": (v.owner.name if v.owner else None) or "Creator",
             "duration": dur_str
         })
 
