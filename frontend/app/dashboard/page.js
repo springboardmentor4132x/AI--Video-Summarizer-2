@@ -17,7 +17,7 @@ export default function Dashboard() {
 
     async function loadVideos() {
       try {
-        const res = await fetch("http://localhost:8000/videos/", {
+        const res = await fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") + "/videos/", {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {

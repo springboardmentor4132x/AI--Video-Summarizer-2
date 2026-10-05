@@ -23,7 +23,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:8000/auth/login", {
+      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") + "/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -45,7 +45,7 @@ export default function LoginPage() {
       localStorage.setItem("clipmind_token", data.access_token);
 
       // Fetch logged-in user profile using JWT token
-      const profileRes = await fetch("http://localhost:8000/auth/me", {
+      const profileRes = await fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") + "/auth/me", {
         headers: {
           Authorization: `Bearer ${data.access_token}`,
         },

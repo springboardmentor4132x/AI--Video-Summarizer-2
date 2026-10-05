@@ -34,7 +34,7 @@ export default function UploadPage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch("http://localhost:8000/videos/upload", {
+      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") + "/videos/upload", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,

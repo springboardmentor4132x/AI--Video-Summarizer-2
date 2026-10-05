@@ -65,7 +65,7 @@ export default function VideoDetailPage() {
       return;
     }
 
-    fetch(`http://localhost:8000/videos/${params.id}/notes`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/videos/${params.id}/notes`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -111,7 +111,7 @@ export default function VideoDetailPage() {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/videos/${params.id}/notes`,
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/videos/${params.id}/notes`,
         {
           method: "POST",
           headers: {
@@ -205,7 +205,7 @@ export default function VideoDetailPage() {
     setSearching(true);
     setSearchError("");
     try {
-      const res = await fetch(`http://localhost:8000/videos/${params.id}/search?q=${encodeURIComponent(searchQuery)}&top_k=5`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/videos/${params.id}/search?q=${encodeURIComponent(searchQuery)}&top_k=5`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("clipmind_token")}` }
       });
       const data = await res.json();

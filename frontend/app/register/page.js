@@ -32,7 +32,7 @@ export default function RegisterPage() {
 
     try {
       const formattedRole = form.role.toLowerCase().replace(" ", "_");
-      const res = await fetch("http://localhost:8000/auth/register", {
+      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") + "/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -56,7 +56,7 @@ export default function RegisterPage() {
       }
 
       // Automatically log in to receive JWT token upon registration
-      const loginRes = await fetch("http://localhost:8000/auth/login", {
+      const loginRes = await fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") + "/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

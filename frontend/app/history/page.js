@@ -26,7 +26,7 @@ export default function HistoryPage() {
       }
 
       try {
-        const res = await fetch("http://localhost:8000/videos/", {
+        const res = await fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") + "/videos/", {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -64,7 +64,7 @@ export default function HistoryPage() {
 
     const token = localStorage.getItem("clipmind_token");
     try {
-      const res = await fetch(`http://localhost:8000/videos/${video.id}/summary`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/videos/${video.id}/summary`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
