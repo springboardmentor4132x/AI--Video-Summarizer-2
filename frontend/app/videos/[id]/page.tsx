@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell, StatusBadge } from "@/components/AppShell";
-import { api, mediaUrl, type AnalysisItem, type JobItem, type SummaryItem, type TranscriptItem, type VideoItem } from "@/lib/api";
+import { api, API_URL, mediaUrl, type AnalysisItem, type JobItem, type SummaryItem, type TranscriptItem, type VideoItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 export default function VideoDetailPage() {
@@ -65,7 +65,7 @@ export default function VideoDetailPage() {
       return;
     }
 
-    fetch(`http://localhost:8000/videos/${params.id}/notes`, {
+    fetch(`${API_URL}/videos/${params.id}/notes`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -111,7 +111,7 @@ export default function VideoDetailPage() {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/videos/${params.id}/notes`,
+        `${API_URL}/videos/${params.id}/notes`,
         {
           method: "POST",
           headers: {
@@ -205,7 +205,7 @@ export default function VideoDetailPage() {
     setSearching(true);
     setSearchError("");
     try {
-      const res = await fetch(`http://localhost:8000/videos/${params.id}/search?q=${encodeURIComponent(searchQuery)}&top_k=5`, {
+      const res = await fetch(`${API_URL}/videos/${params.id}/search?q=${encodeURIComponent(searchQuery)}&top_k=5`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("clipmind_token")}` }
       });
       const data = await res.json();
