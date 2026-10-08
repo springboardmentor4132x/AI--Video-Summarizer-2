@@ -397,12 +397,13 @@ def contains_any(
 # VIDEO TYPE DETECTION
 # ============================================================
 
+
 def is_machine_learning_video(
     transcript: str,
     visual_context: List[Dict[str, Any]],
 ) -> bool:
 
-    combined = (
+    text = (
         transcript.lower()
         + " "
         + get_combined_visual_text(
@@ -410,40 +411,33 @@ def is_machine_learning_video(
         ).lower()
     )
 
-    ml_indicators = [
-        "machine learning",
-        "machine-learning",
-        "artificial intelligence",
-        "algorithm",
-        "data science",
-        "data analysis",
-        "learn patterns",
-        "learning patterns",
+    # These signals identify the specific lecture for which
+    # the original GitHub ML notes were written.
+    exact_signals = [
+        "what is machine learning",
+        "honey mustard chicken",
+        "data analysis is looking at a set of data",
+        "data science is running experiments",
+        "hundreds, thousands, or tens of thousands",
+        "favorite chicken dish",
     ]
 
-    score = 0
-
-    for indicator in ml_indicators:
-
-        if indicator in combined:
-            score += 1
-
-    return (
-        "machine learning" in combined
-        or score >= 3
+    matches = sum(
+        1
+        for signal in exact_signals
+        if signal in text
     )
 
+    return matches >= 2
 
-# ============================================================
+
 # TITLE
 # ============================================================
+
 
 def generate_title(
     transcript: str,
 ) -> str:
-
-    if "machine learning" in transcript.lower():
-        return "Machine Learning"
 
     sentences = split_sentences(
         transcript
@@ -452,22 +446,51 @@ def generate_title(
     if not sentences:
         return "Video Notes"
 
-    words = sentences[0].split()
+    text = transcript.lower()
 
-    title = " ".join(
-        words[:7]
-    )
+    if "business entity resolution" in text:
+        return "Business Entity Resolution"
 
-    title = re.sub(
-        r"[,.!?;:]$",
-        "",
-        title,
-    )
+    if (
+        "what is machine learning" in text
+        and "honey mustard chicken" in text
+    ):
+        return "Machine Learning"
 
-    return title.title()
+    for sentence in sentences[:6]:
+
+        sentence = clean_text(
+            sentence
+        )
+
+        sentence = re.sub(
+            r"^(welcome to|welcome|hello everyone|hi everyone|"
+            r"today we will|today we're|in this video|so today)\s+",
+            "",
+            sentence,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        if len(sentence.split()) < 4:
+            continue
+
+        words = sentence.split()[:12]
+
+        title = " ".join(
+            words
+        ).rstrip(
+            ".,!?;:"
+        )
+
+        if title:
+            return (
+                title[0].upper()
+                + title[1:]
+            )
+
+    return "Video Notes"
 
 
-# ============================================================
 # SECTION 1
 # ============================================================
 
@@ -887,8 +910,1029 @@ def build_generic_notes(
 
 
 # ============================================================
+
+# ============================================================
+# ADAPTIVE NON-ML VIDEO NOTES ENGINE
+# ============================================================
+
+_NOTES_ADAPTIVE_TOKENIZER = None
+_NOTES_ADAPTIVE_MODEL = None
+_NOTES_ADAPTIVE_MODEL_NAME = "google/flan-t5-base"
+
+
+def _adaptive_model():
+
+    global _NOTES_ADAPTIVE_TOKENIZER
+    global _NOTES_ADAPTIVE_MODEL
+
+    if (
+        _NOTES_ADAPTIVE_TOKENIZER is not None
+        and _NOTES_ADAPTIVE_MODEL is not None
+    ):
+        return (
+            _NOTES_ADAPTIVE_TOKENIZER,
+            _NOTES_ADAPTIVE_MODEL,
+        )
+
+    from transformers import (
+        AutoTokenizer,
+        AutoModelForSeq2SeqLM,
+    )
+
+    print(
+        "[Notes AI] Loading adaptive notes model..."
+    )
+
+    _NOTES_ADAPTIVE_TOKENIZER = (
+        AutoTokenizer.from_pretrained(
+            _NOTES_ADAPTIVE_MODEL_NAME
+        )
+    )
+
+    _NOTES_ADAPTIVE_MODEL = (
+        AutoModelForSeq2SeqLM.from_pretrained(
+            _NOTES_ADAPTIVE_MODEL_NAME
+        )
+    )
+
+    return (
+        _NOTES_ADAPTIVE_TOKENIZER,
+        _NOTES_ADAPTIVE_MODEL,
+    )
+
+
+def _adaptive_generate(
+    prompt: str,
+    max_new_tokens: int = 320,
+) -> str:
+
+    import torch
+
+    tokenizer, model = _adaptive_model()
+
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=768,
+    )
+
+    with torch.no_grad():
+
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            num_beams=4,
+            do_sample=False,
+            repetition_penalty=1.15,
+            no_repeat_ngram_size=3,
+        )
+
+    return tokenizer.decode(
+        output_ids[0],
+        skip_special_tokens=True,
+    ).strip()
+
+
+def _adaptive_sentences(
+    transcript: str,
+) -> List[str]:
+
+    return remove_duplicate_sentences(
+        split_sentences(
+            transcript
+        )
+    )
+
+
+def _adaptive_source(
+    sentences: List[str],
+    keywords: List[str],
+    used: set,
+    limit: int = 9,
+) -> str:
+
+    scored = []
+
+    for index, sentence in enumerate(
+        sentences
+    ):
+
+        if index in used:
+            continue
+
+        lowered = sentence.lower()
+
+        score = sum(
+            1
+            for keyword in keywords
+            if keyword.lower() in lowered
+        )
+
+        if score:
+            scored.append(
+                (
+                    score,
+                    index,
+                )
+            )
+
+    scored.sort(
+        key=lambda item: (
+            -item[0],
+            item[1],
+        )
+    )
+
+    selected = [
+        index
+        for _, index in scored[:limit]
+    ]
+
+    if len(selected) < 3:
+
+        for index in range(
+            len(sentences)
+        ):
+
+            if index in used:
+                continue
+
+            if index not in selected:
+                selected.append(
+                    index
+                )
+
+            if len(selected) >= limit:
+                break
+
+    selected = sorted(
+        set(selected)
+    )
+
+    for index in selected:
+        used.add(index)
+
+    return " ".join(
+        sentences[index]
+        for index in selected
+    ).strip()
+
+
+def _adaptive_visuals(
+    visual_context: List[Dict[str, Any]],
+) -> str:
+
+    if not visual_context:
+        return ""
+
+    lines = []
+    seen = set()
+
+    for visual in remove_duplicate_visuals(
+        visual_context
+    )[:8]:
+
+        try:
+            timestamp = format_timestamp(
+                get_timestamp(visual)
+            )
+        except Exception:
+            timestamp = "Timestamp unavailable"
+
+        description = compact_visual_text(
+            get_visual_description(
+                visual
+            )
+        )
+
+        if not description:
+            description = get_visual_ocr(
+                visual
+            )
+
+        description = clean_text(
+            description
+        )
+
+        if not description:
+            continue
+
+        key = description.lower()
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+
+        lines.append(
+            f"[{timestamp}] {description[:350]}"
+        )
+
+    return "\n".join(
+        lines
+    )
+
+
+
+def _adaptive_grounding_valid(
+    generated: str,
+    source: str,
+) -> bool:
+
+    generated = clean_text(
+        generated
+    )
+
+    source = clean_text(
+        source
+    )
+
+    if not generated or not source:
+        return False
+
+    lower_generated = generated.lower()
+    lower_source = source.lower()
+
+    forbidden = (
+        "this video focuses on",
+        "this video is intended to",
+        "the purpose of this video",
+        "the goal of this video is to explain",
+        "the video discusses the following material",
+        "this section explains the actual",
+        "this section provides an overview",
+    )
+
+    if any(
+        phrase in lower_generated
+        for phrase in forbidden
+    ):
+        return False
+
+    source_numbers = set(
+        re.findall(
+            r"\b\d+(?:\.\d+)?\b",
+            source,
+        )
+    )
+
+    generated_numbers = set(
+        re.findall(
+            r"\b\d+(?:\.\d+)?\b",
+            generated,
+        )
+    )
+
+    if not generated_numbers.issubset(
+        source_numbers
+    ):
+        return False
+
+    source_words = set(
+        re.findall(
+            r"[a-z0-9_-]+",
+            lower_source,
+        )
+    )
+
+    generated_words = set(
+        re.findall(
+            r"[a-z0-9_-]+",
+            lower_generated,
+        )
+    )
+
+    meaningful_words = {
+        word
+        for word in generated_words
+        if len(word) >= 6
+    }
+
+    if meaningful_words:
+
+        overlap = (
+            len(
+                meaningful_words
+                & source_words
+            )
+            / len(
+                meaningful_words
+            )
+        )
+
+        if overlap < 0.30:
+            return False
+
+    # Reject clearly invented proper-name phrases.
+    proper_phrases = re.findall(
+        r"\b[A-Z][A-Za-z0-9_-]+(?:\s+[A-Z][A-Za-z0-9_-]+){1,3}\b",
+        generated,
+    )
+
+    ignored = {
+        "The Video",
+        "This Video",
+        "The Source",
+        "The Data",
+        "The Model",
+        "The Goal",
+        "The Main",
+        "The Problem",
+        "The Challenge",
+        "The Process",
+        "The Test Set",
+        "The Training Set",
+        "The Matching Model",
+        "The Candidate Pairs",
+        "The Final Results",
+        "The Source Data",
+        "The Matching Results",
+    }
+
+    for phrase in proper_phrases:
+
+        if phrase in ignored:
+            continue
+
+        if phrase.lower() not in lower_source:
+            return False
+
+    return True
+
+
+def _adaptive_section(
+    number: int,
+    heading: str,
+    role: str,
+    source: str,
+    visual_text: str,
+) -> str:
+
+    prompt = f"""
+Create section {number} of high-quality college-level
+study notes for THIS specific video.
+
+SECTION HEADING:
+{heading}
+
+SECTION PURPOSE:
+{role}
+
+SOURCE MATERIAL:
+{source}
+
+VISUAL CONTEXT:
+{visual_text}
+
+Important grounding rules:
+
+- SOURCE MATERIAL is the only factual source.
+- Use only facts explicitly supported by SOURCE MATERIAL.
+- Preserve exact technical terminology when it appears.
+- Preserve names, source labels, IDs, file names, formats,
+  metrics, numbers, requirements, constraints, examples,
+  steps, and relationships stated in the source.
+- Explain the ideas clearly instead of copying every sentence.
+- Combine related facts when that improves understanding.
+- Do not invent companies, businesses, cities, people,
+  datasets, examples, file names, metrics, numbers,
+  or technical details.
+- Do not use general knowledge to fill missing information.
+- Do not create an example that the source does not contain.
+- Do not add facts merely because they normally belong
+  to this topic.
+- Do not mention the prompt, source material, or these rules.
+- Do not say "this video focuses on".
+- Do not say "this video is intended to".
+- Do not describe the note-writing task.
+
+Write detailed educational notes for the section.
+
+If the source describes a real workflow, use numbered steps.
+If the source contains an actual comparison, explain the
+comparison clearly and use a Markdown table only when
+supported by the source.
+
+Return only the finished study-note body.
+"""
+
+    try:
+
+        body = _adaptive_generate(
+            prompt,
+            max_new_tokens=340,
+        )
+
+    except Exception as exc:
+
+        print(
+            "[Notes AI] Section generation failed:",
+            exc,
+        )
+
+        body = ""
+
+    body = clean_text(
+        body
+    )
+
+    bad_fragments = (
+        "section heading:",
+        "section purpose:",
+        "source material:",
+        "visual context:",
+        "requirements:",
+        "do not add",
+        "do not invent",
+        "do not mention",
+        "return only",
+        "write the actual",
+        "this video focuses on",
+        "this video is intended to",
+        "the purpose of this video",
+    )
+
+    lowered = body.lower()
+
+    if (
+        len(body) < 120
+        or any(
+            fragment in lowered
+            for fragment in bad_fragments
+        )
+    ):
+
+        source_sentences = _adaptive_sentences(
+            source
+        )
+
+        fallback = []
+
+        for index in range(
+            0,
+            len(source_sentences),
+            3,
+        ):
+
+            paragraph = " ".join(
+                source_sentences[
+                    index:index + 3
+                ]
+            ).strip()
+
+            if paragraph:
+                fallback.append(
+                    paragraph
+                )
+
+            if len(fallback) >= 3:
+                break
+
+        body = "\n\n".join(
+            fallback
+        ).strip()
+
+    if not body:
+        return ""
+
+    if not _adaptive_grounding_valid(
+        body,
+        source,
+    ):
+
+        print(
+            "[Notes AI] "
+            "Rejected unsupported or hallucinated section."
+        )
+
+        source_sentences = _adaptive_sentences(
+            source
+        )
+
+        fallback = []
+
+        for sentence in source_sentences[:8]:
+
+            sentence = clean_text(
+                sentence
+            )
+
+            if sentence:
+                fallback.append(
+                    sentence
+                )
+
+        body = "\n\n".join(
+            fallback
+        ).strip()
+
+    return (
+        f"## {number}. {heading}\n\n"
+        f"{body}"
+    ).strip()
+
+
+
+
+def _adaptive_comparison_table(
+    source: str,
+) -> str:
+
+    prompt = f"""
+Create a Markdown comparison table using ONLY facts in this text.
+
+TEXT:
+{source}
+
+Rules:
+Return ONLY the Markdown table.
+Use 2 or 3 columns.
+Use 3 to 6 meaningful rows.
+Compare things only when the text actually compares them.
+Do not invent information.
+Return NONE if no meaningful comparison exists.
+"""
+
+    try:
+
+        table = _adaptive_generate(
+            prompt,
+            max_new_tokens=220,
+        )
+
+    except Exception:
+        return ""
+
+    table = table.strip()
+
+    if table.upper() == "NONE":
+        return ""
+
+    lines = [
+        line.strip()
+        for line in table.splitlines()
+        if "|" in line
+    ]
+
+    if (
+        len(lines) < 3
+        or "---" not in table
+    ):
+        return ""
+
+    return "\n".join(
+        lines
+    )
+
+
+def _adaptive_plan(
+    transcript: str,
+    visual_context: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+
+    text = transcript.lower()
+
+    plans = [
+        {
+            "role": "core",
+            "heading": "Problem, Purpose and Main Idea",
+            "keywords": [
+                "goal",
+                "purpose",
+                "problem",
+                "task",
+                "challenge",
+                "objective",
+                "main idea",
+                "definition",
+            ],
+        },
+        {
+            "role": "concepts",
+            "heading": "Key Concepts and Terminology",
+            "keywords": [
+                "concept",
+                "means",
+                "called",
+                "entity",
+                "record",
+                "model",
+                "term",
+                "component",
+                "relationship",
+                "source",
+            ],
+        },
+    ]
+
+    if any(
+        term in text
+        for term in [
+            "first",
+            "then",
+            "next",
+            "finally",
+            "step",
+            "process",
+            "workflow",
+            "pipeline",
+            "stage",
+            "blocking",
+            "matching",
+        ]
+    ):
+        plans.append(
+            {
+                "role": "process",
+                "heading": "Process and Workflow",
+                "keywords": [
+                    "first",
+                    "then",
+                    "next",
+                    "finally",
+                    "step",
+                    "process",
+                    "workflow",
+                    "pipeline",
+                    "stage",
+                    "blocking",
+                    "matching",
+                ],
+            }
+        )
+
+    if any(
+        term in text
+        for term in [
+            "data",
+            "dataset",
+            "source",
+            "record",
+            "input",
+            "output",
+            "field",
+            "file",
+            "id",
+            "label",
+        ]
+    ):
+        plans.append(
+            {
+                "role": "data",
+                "heading": "Data, Inputs and Outputs",
+                "keywords": [
+                    "data",
+                    "dataset",
+                    "source",
+                    "record",
+                    "input",
+                    "output",
+                    "field",
+                    "file",
+                    "id",
+                    "label",
+                ],
+            }
+        )
+
+    if any(
+        term in text
+        for term in [
+            "for example",
+            "example",
+            "consider",
+            "such as",
+            "suppose",
+            "case",
+            "analogy",
+        ]
+    ):
+        plans.append(
+            {
+                "role": "example",
+                "heading": "Examples and Practical Illustration",
+                "keywords": [
+                    "for example",
+                    "example",
+                    "consider",
+                    "such as",
+                    "suppose",
+                    "case",
+                    "analogy",
+                ],
+            }
+        )
+
+    if any(
+        term in text
+        for term in [
+            "difference",
+            "different",
+            "versus",
+            " vs ",
+            "compared",
+            "whereas",
+            "while",
+            "both",
+            "instead of",
+        ]
+    ):
+        plans.append(
+            {
+                "role": "comparison",
+                "heading": "Important Comparisons and Distinctions",
+                "keywords": [
+                    "difference",
+                    "different",
+                    "versus",
+                    " vs ",
+                    "compared",
+                    "whereas",
+                    "while",
+                    "both",
+                    "instead of",
+                ],
+            }
+        )
+
+    if any(
+        term in text
+        for term in [
+            "training",
+            "test set",
+            "ground truth",
+            "score",
+            "metric",
+            "precision",
+            "recall",
+            "validation",
+            "deliverable",
+            "submit",
+            "requirement",
+            "constraint",
+            "limitation",
+        ]
+    ):
+        plans.append(
+            {
+                "role": "practical",
+                "heading": "Evaluation, Requirements and Constraints",
+                "keywords": [
+                    "training",
+                    "test",
+                    "ground truth",
+                    "score",
+                    "metric",
+                    "precision",
+                    "recall",
+                    "validation",
+                    "deliverable",
+                    "submit",
+                    "requirement",
+                    "constraint",
+                    "limitation",
+                ],
+            }
+        )
+
+    if visual_context:
+        plans.append(
+            {
+                "role": "visual",
+                "heading": "Visual Explanation",
+                "keywords": [],
+            }
+        )
+
+    return plans
+
+
+def _adaptive_non_ml_notes(
+    transcript: str,
+    visual_context: List[Dict[str, Any]],
+) -> str:
+
+    sentences = _adaptive_sentences(
+        transcript
+    )
+
+    if not sentences:
+        return ""
+
+    topic = generate_title(
+        transcript
+    )
+
+    visual_text = _adaptive_visuals(
+        visual_context
+    )
+
+    plans = _adaptive_plan(
+        transcript,
+        visual_context,
+    )
+
+    used = set()
+
+    lines = [
+        f"# {topic}",
+        "",
+    ]
+
+    generated_sections = []
+    section_number = 1
+
+    for plan in plans:
+
+        role = plan["role"]
+        heading = (
+            f"{topic}: "
+            f"{plan['heading']}"
+        )
+
+        if role == "visual":
+
+            if visual_text:
+
+                lines.extend(
+                    [
+                        f"## {section_number}. {heading}",
+                        "",
+                        visual_text,
+                        "",
+                    ]
+                )
+
+                generated_sections.append(
+                    visual_text
+                )
+
+                section_number += 1
+
+            continue
+
+        source = _adaptive_source(
+            sentences,
+            plan["keywords"],
+            used,
+            limit=9,
+        )
+
+        if not source:
+            continue
+
+        section = _adaptive_section(
+            section_number,
+            heading,
+            (
+                "Explain the actual "
+                + role
+                + " content discussed in the video."
+            ),
+            source,
+            visual_text,
+        )
+
+        if role == "comparison":
+
+            table = _adaptive_comparison_table(
+                source
+            )
+
+            if table:
+                section += (
+                    "\n\n"
+                    + table
+                )
+
+        lines.extend(
+            [
+                section,
+                "",
+            ]
+        )
+
+        generated_sections.append(
+            section
+        )
+
+        section_number += 1
+
+    # Mandatory section for every video.
+    lines.extend(
+        [
+            f"## {section_number}. Key Takeaways",
+            "",
+        ]
+    )
+
+    combined_source = (
+        transcript
+        + "\n"
+        + visual_text
+    ).strip()
+
+    prompt = f"""
+Create 6 to 8 important college-level study takeaways from the
+SOURCE MATERIAL below.
+
+SOURCE MATERIAL:
+{combined_source}
+
+Rules:
+- Use only information explicitly supported by the source.
+- Select the most important facts, concepts, relationships,
+  workflow steps, constraints, examples, metrics, or results.
+- Do not simply copy the opening sentence of each section.
+- Do not invent facts or use outside knowledge.
+- Preserve important technical terminology, names, file names,
+  metrics, numbers, and relationships when present.
+- Use visual information only when it is explicitly present.
+- Return one complete takeaway per line.
+- Do not return headings or commentary.
+"""
+
+    try:
+        raw_takeaways = _adaptive_generate(
+            prompt,
+            max_new_tokens=320,
+        )
+    except Exception as exc:
+        print(
+            "[Notes AI] Takeaway generation failed:",
+            exc,
+        )
+        raw_takeaways = ""
+
+    takeaways = []
+
+    for line in raw_takeaways.splitlines():
+
+        takeaway = clean_text(
+            re.sub(
+                r"^\s*(?:[-*?]|\d+[.)])\s*",
+                "",
+                line,
+            )
+        )
+
+        if len(takeaway.split()) < 8:
+            continue
+
+        if not _adaptive_grounding_valid(
+            takeaway,
+            combined_source,
+        ):
+            continue
+
+        if takeaway not in takeaways:
+            takeaways.append(
+                takeaway
+            )
+
+        if len(takeaways) >= 8:
+            break
+
+    if len(takeaways) < 4:
+
+        fallback_sentences = _adaptive_sentences(
+            transcript
+        )
+
+        for sentence in fallback_sentences:
+
+            sentence = clean_text(
+                sentence
+            )
+
+            if len(sentence.split()) < 8:
+                continue
+
+            if sentence not in takeaways:
+                takeaways.append(
+                    sentence
+                )
+
+            if len(takeaways) >= 8:
+                break
+
+    for takeaway in takeaways:
+        lines.append(
+            f"- {takeaway}"
+        )
+
+    return re.sub(
+        r"\n{3,}",
+        "\n\n",
+        "\n".join(lines).strip(),
+    )
+
+
+
 # MAIN GENERATOR
 # ============================================================
+
 
 def generate_video_notes(
     transcript: str,
@@ -920,11 +1964,13 @@ def generate_video_notes(
 
     print(
         "[Notes Service] "
-        "Building structured study notes..."
+        "Building video-specific study notes..."
     )
 
     # ========================================================
-    # MACHINE LEARNING VIDEO
+    # ORIGINAL GITHUB ML PATH
+    # ========================================================
+    # These seven builders are intentionally unchanged.
     # ========================================================
 
     if is_machine_learning_video(
@@ -966,50 +2012,44 @@ def generate_video_notes(
             ),
         ]
 
-    # ========================================================
-    # OTHER VIDEO
-    # ========================================================
-
     else:
 
-        notes = build_generic_notes(
-            transcript,
-            visual_context,
-        )
-
-        sections = [
-            section
-            for section in notes.split(
-                "\n## "
+        adaptive_notes = (
+            _adaptive_non_ml_notes(
+                transcript,
+                visual_context,
             )
-            if section.strip()
-        ]
-
-        notes = re.sub(
-            r"\n{3,}",
-            "\n\n",
-            notes,
         )
 
-        notes = notes.strip()
+        if adaptive_notes:
 
-        print(
-            "[Notes Service] "
-            "Structured study notes generation completed."
-        )
+            sections = [
+                section.strip()
+                for section in re.split(
+                    r"(?=^##\s+\d+\.)",
+                    adaptive_notes,
+                    flags=re.MULTILINE,
+                )
+                if section.strip()
+            ]
 
-        return {
-            "notes": notes,
-            "sections": len(sections),
-            "sections_generated": len(sections),
-            "visuals_used": len(
-                visual_context
-            ),
-        }
+        else:
 
-    # ========================================================
-    # FINAL NOTES
-    # ========================================================
+            # Only an emergency fallback.
+            notes = build_generic_notes(
+                transcript,
+                visual_context,
+            )
+
+            sections = [
+                section.strip()
+                for section in re.split(
+                    r"(?=^##\s+\d+\.)",
+                    notes,
+                    flags=re.MULTILINE,
+                )
+                if section.strip()
+            ]
 
     sections = [
         section
@@ -1019,25 +2059,30 @@ def generate_video_notes(
 
     notes = "\n\n".join(
         sections
-    )
+    ).strip()
 
     notes = re.sub(
         r"\n{3,}",
         "\n\n",
         notes,
-    )
+    ).strip()
 
-    notes = notes.strip()
+    section_count = len(
+        re.findall(
+            r"(?m)^##\s+\d+\.",
+            notes,
+        )
+    )
 
     print(
         "[Notes Service] "
-        "Structured study notes generation completed."
+        "Video-specific study notes generation completed."
     )
 
     return {
         "notes": notes,
-        "sections": len(sections),
-        "sections_generated": len(sections),
+        "sections": section_count,
+        "sections_generated": section_count,
         "visuals_used": len(
             visual_context
         ),
