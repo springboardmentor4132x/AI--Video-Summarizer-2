@@ -39,22 +39,32 @@ By uploading a video to our secure platform, ClipMind intelligently rips the aud
 
 ## 📸 Platform Walkthrough & Gallery
 
+*(Note to author: Make sure to upload your exact screenshots to GitHub and place their paths in the image links below!)*
+
 ### 1. The Landing Page
-![Landing Page](https://via.placeholder.com/800x400.png?text=Landing+Page)
+`[INSERT SCREENSHOT OF LANDING PAGE HERE]`
 *A stunning, highly-responsive entrance. It instantly communicates the value proposition to educators and students, offering direct routes to Create an Account or securely Sign in via our JWT authentication layer.*
 
 ### 2. Live Analytics Studio
-![Analytics Dashboard](https://via.placeholder.com/800x400.png?text=Live+Analytics+Studio)
+`[INSERT SCREENSHOT OF ANALYTICS DASHBOARD HERE]`
 *Our command center. This provides a real-time mathematical breakdown of platform health. It tracks total videos, successful AI pipelines, and average video duration. We utilized specialized Donut and Line charts to visually display the exact processing trends over 7, 30, and 90 days.*
 
 ### 3. Key Insights & Activity Feed
-![Insights & Feed](https://via.placeholder.com/800x400.png?text=Insights+and+Activity+Feed)
+`[INSERT SCREENSHOT OF INSIGHTS & ACTIVITY HERE]`
 *On the right side of the dashboard, users see a chronological history of their exact uploads along with AI-generated insights indicating total uptime, success rates, and pipeline stability.*
 
 ### 4. Processing Library
-![Library Options](https://via.placeholder.com/800x400.png?text=Video+Library)
+`[INSERT SCREENSHOT OF LIBRARY HERE]`
 *The central hub for all uploaded media. It dynamically fetches the high-resolution thumbnails generated natively by FFmpeg and clearly displays the processing status (Uploaded -> Processing -> Completed).*
 
 ### 5. AI Summary Generation
-![AI Summary](https://via.placeholder.com/800x400.png?text=AI+Summary+Page)
+`[INSERT SCREENSHOT OF AI SUMMARY HERE]`
 *The end result of our heavy ML backend. On the left, it provides a punchy, one-sentence Short Summary. On the right, it provides a deeply detailed, extractive summary analyzing the entire context of the video.*
+
+### 6. AI Structured Study Notes
+`[INSERT SCREENSHOT OF STUDY NOTES HERE]`
+*Using the transcript, ClipMind creates perfectly organized, heading-separated study notes. This allows viewers to easily digest complex topics (like Machine Learning vs Traditional Programming) into readable bullet-points.*
+
+### 7. Semantic QA (Video Search)
+`[INSERT SCREENSHOT OF SEMANTIC QA HERE]`
+*Students can ask raw questions (e.g., "What is a normal algorithm?"). Using PostgreSQL `pgvector`, the AI mathematically calculates Cosine Similarity across all transcript chunks and successfully jumps the user to the exact timestamp (e.g., `1:05`) where it was mentioned!*
