@@ -1,0 +1,42 @@
+
+services:
+  backend:
+    build:
+      context: ./clipmind-backend-only/clipmind-backend-only
+      dockerfile: Dockerfile
+    container_name: clipmind-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-change-me}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - DATABASE_URL=sqlite:///./clipmind.db
+      - UPLOAD_DIR=uploads
+    volumes:
+      # Volumes: container restart/rebuild hone par bhi uploaded videos
+      # aur database khona nahi chahiye — isliye host folders se map kiya hai.
+      - ./clipmind-backend-only/clipmind-backend-only/uploads:/app/uploads
+      - ./clipmind-backend-only/clipmind-backend-only/clipmind.db:/app/clipmind.db
+    networks:
+      - clipmind-network
+
+  frontend:
+    build:
+      context: ./clipmind-frontend-only
+      dockerfile: Dockerfile
+    container_name: clipmind-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - clipmind-network
+
+# Networking: dono containers isi network par hain, isliye yeh ek-doosre ko
+# naam se (jaise http://backend:8000) bhi call kar sakte hain agar zaroorat ho.
+# Abhi frontend browser ke through seedhe http://127.0.0.1:8000 call karta
+# hai (api.js mein), jo port-mapping ki wajah se host machine par kaam karta hai.
+networks:
+  clipmind-network:
+    driver: bridge
