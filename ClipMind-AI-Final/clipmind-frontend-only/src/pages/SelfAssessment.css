@@ -1,0 +1,263 @@
+.quiz-page {
+    min-height: 100vh;
+    padding: 30px;
+    background: #f6f7fb;
+    box-sizing: border-box;
+  }
+   
+  /* Reset: neutralize project's global button{width:100%} tag rule (same
+     fix applied on Assistant/Transcript/Analytics pages). */
+  .quiz-page button {
+    width: auto;
+    margin-top: 0;
+  }
+   
+  .quiz-header {
+    max-width: 1300px;
+    margin: 0 auto 25px;
+  }
+   
+  .module-label {
+    color: #4f46e5;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 1.5px;
+    margin: 0;
+  }
+   
+  .quiz-header h1 {
+    margin: 6px 0 0;
+    font-size: 30px;
+  }
+   
+  .quiz-header p {
+    margin-top: 7px;
+    color: #777;
+  }
+   
+  .error {
+    max-width: 1300px;
+    margin: 0 auto 16px;
+    background: #fde8e8;
+    color: #c5221f;
+    padding: 12px 16px;
+    border-radius: 10px;
+  }
+   
+  .quiz-layout {
+    max-width: 1300px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 22px;
+    align-items: start;
+  }
+   
+  @media (max-width: 900px) {
+    .quiz-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+   
+  .video-sidebar {
+    position: sticky;
+    top: 20px;
+    background: white;
+    padding: 20px;
+    border-radius: 14px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.05);
+  }
+   
+  .video-sidebar h2 {
+    margin: 0 0 14px;
+    font-size: 18px;
+  }
+   
+  .km-video {
+    width: 100%;
+    border-radius: 12px;
+    background: #000;
+    display: block;
+  }
+   
+  .quiz-card {
+    background: white;
+    border-radius: 14px;
+    padding: 26px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.05);
+  }
+   
+  .quiz-progress {
+    font-size: 13px;
+    font-weight: 700;
+    color: #4f46e5;
+    margin-bottom: 18px;
+  }
+   
+  .question-list {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+  }
+   
+  .question-block {
+    padding-bottom: 22px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+   
+  .question-block:last-child {
+    border-bottom: none;
+  }
+   
+  .question-text {
+    font-size: 15px;
+    line-height: 1.6;
+    color: #202124;
+    white-space: pre-line;
+    margin: 0 0 14px;
+  }
+   
+  .question-number {
+    font-weight: 800;
+    color: #4f46e5;
+  }
+   
+  .options-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+   
+  .option-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #f8f9fc;
+    cursor: pointer;
+    font-size: 14px;
+    border: 1px solid transparent;
+  }
+   
+  .option-item input {
+    margin: 0;
+    width: auto;
+  }
+   
+  .option-item:hover {
+    background: #eef0fb;
+  }
+   
+  .option-item.correct {
+    background: #e7f7ed;
+    border-color: #22c55e;
+    color: #16803c;
+    font-weight: 600;
+  }
+   
+  .option-item.incorrect {
+    background: #fde8e8;
+    border-color: #ef4444;
+    color: #c5221f;
+    font-weight: 600;
+  }
+   
+  .feedback {
+    margin-top: 12px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    font-size: 13.5px;
+  }
+   
+  .feedback p {
+    margin: 6px 0 10px;
+  }
+   
+  .feedback.correct {
+    background: #f0fdf4;
+    color: #16803c;
+  }
+   
+  .feedback.incorrect {
+    background: #fef2f2;
+    color: #c5221f;
+  }
+   
+  .jump-link {
+    border: none;
+    background: white;
+    color: #4f46e5;
+    font-weight: 600;
+    font-size: 12.5px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  }
+   
+  .jump-link:hover {
+    background: #4f46e5;
+    color: white;
+  }
+   
+  /* ---------- Result card ---------- */
+  .result-card {
+    margin-top: 26px;
+    padding: 22px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #eef0fb, #f8f9fc);
+    border: 1px solid #e0e0f5;
+  }
+   
+  .result-card h2 {
+    margin: 0 0 14px;
+    font-size: 22px;
+    color: #202124;
+  }
+   
+  .weak-topics h3 {
+    font-size: 15px;
+    margin: 0 0 10px;
+  }
+   
+  .weak-topics ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+   
+  .weak-topics li {
+    font-size: 13.5px;
+    color: #444;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+   
+  .retry-button {
+    margin-top: 18px;
+    border: none;
+    background: #4f46e5;
+    color: white;
+    padding: 12px 22px;
+    border-radius: 24px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+   
+  .retry-button:hover {
+    background: #4338ca;
+  }
+   
+  
+  
+  
+  
+  
+  
+  
+  
