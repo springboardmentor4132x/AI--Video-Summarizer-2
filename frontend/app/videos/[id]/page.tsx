@@ -1,0 +1,606 @@
+"use client";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+import { useParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppShell, StatusBadge } from "@/components/AppShell";
+import { api, mediaUrl, type AnalysisItem, type JobItem, type SummaryItem, type TranscriptItem, type VideoItem } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+
+export default function VideoDetailPage() {
+  const params = useParams<{ id: string }>();
+  const { user } = useAuth();
+  const [video, setVideo] = useState<VideoItem | null>(null);
+  const [jobs, setJobs] = useState<JobItem[]>([]);
+  const [transcript, setTranscript] = useState<TranscriptItem | null>(null);
+  const [summary, setSummary] = useState<SummaryItem | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisItem>({ topics: [], key_moments: [], questions: [] });
+  const [editing, setEditing] = useState(false);
+  const [transcriptText, setTranscriptText] = useState("");
+    const [notes, setNotes] = useState("");
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const playerRef = useRef<HTMLVideoElement>(null);
+  // Sanjana's Semantic Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{chunk_index:number; text:string; similarity:number; importance_score:number; start_sec:number}[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+
+  // Offline Multilingual Translation
+  const [translating, setTranslating] = useState(false);
+  const [targetLang, setTargetLang] = useState("hin_Deva");
+  const [translatedSummary, setTranslatedSummary] = useState("");
+  const [translatedTranscript, setTranslatedTranscript] = useState("");
+
+  const load = useCallback(async () => {
+    const [v, j, t, s, a] = await Promise.all([api.video(params.id), api.jobs(params.id), api.transcript(params.id), api.summary(params.id), api.analysis(params.id)]);
+    setVideo(v);
+    setJobs(j);
+    setTranscript(t);
+    setTranscriptText(t.edited_text || t.full_text || "");
+    setSummary(s);
+    setAnalysis(a);
+  }, [params.id]);
+
+  useEffect(() => {
+    load().catch((err) => setError(err.message));
+  }, [load]);
+
+  useEffect(() => {
+    const active = jobs.some((j) => j.status === "queued" || j.status === "running") || video?.status === "processing" || transcript?.status === "processing" || summary?.status === "processing";
+    if (!active) return;
+    const timer = setInterval(() => {
+      load().catch(() => undefined);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [jobs, video?.status, load]);
+
+    useEffect(() => {
+    const token = localStorage.getItem("clipmind_token");
+
+    if (!token) {
+      return;
+    }
+
+    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/videos/${params.id}/notes`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        setNotes(data.notes || "");
+      })
+      .catch(() => {});
+  }, [params.id]);
+
+  async function generateNotes() {
+    setError("");
+
+    if (!video) {
+      setError("Video information is not available yet.");
+      return;
+    }
+
+    if (video.status !== "completed") {
+      setError("Please wait until video processing is completed.");
+      return;
+    }
+
+    if (transcript?.status !== "completed") {
+      setError("Transcript is not available yet.");
+      return;
+    }
+
+    const token = localStorage.getItem("clipmind_token");
+
+    if (!token) {
+      setError("Authentication token not found. Please log in again.");
+      return;
+    }
+
+    setNotesLoading(true);
+
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/videos/${params.id}/notes`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            "Could not generate notes."
+        );
+      }
+
+      setNotes(typeof data.notes === "string" ? data.notes : "");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not generate notes."
+      );
+    } finally {
+      setNotesLoading(false);
+    }
+  }
+
+  async function processNow() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.processVideo(params.id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start processing");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveTranscript() {
+    setBusy(true);
+    try { setTranscript(await api.updateTranscript(params.id, transcriptText)); setEditing(false); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not save transcript"); }
+    finally { setBusy(false); }
+  }
+
+  async function generateSummary() {
+    setBusy(true);
+    try { await api.generateSummary(params.id); await load(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not start summary"); }
+    finally { setBusy(false); }
+  }
+
+  async function rerunAnalysis() {
+    setBusy(true);
+    try { await api.rerunAnalysis(params.id); await load(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not start analysis"); }
+    finally { setBusy(false); }
+  }
+
+  function seekTo(seconds: number) {
+    if (playerRef.current) {
+      playerRef.current.currentTime = seconds;
+      void playerRef.current.play();
+    }
+  }
+
+  async function runTranslation() {
+    setTranslating(true);
+    setError("");
+    setTranslatedSummary("");
+    setTranslatedTranscript("");
+    try {
+      const res = await api.translate(params.id, targetLang);
+      setTranslatedSummary(res.translated_summary || "");
+      setTranslatedTranscript(res.translated_transcript || "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Translation failed.");
+    } finally {
+      setTranslating(false);
+    }
+  }
+
+  async function runSearch() {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    setSearchError("");
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/videos/${params.id}/search?q=${encodeURIComponent(searchQuery)}&top_k=5`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("clipmind_token")}` }
+      });
+      const data = await res.json();
+      setSearchResults(data.results || []);
+      if ((data.results || []).length === 0) setSearchError(data.message || "No results found.");
+    } catch {
+      setSearchError("Search failed. Make sure the video has been processed first.");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function formatTime(seconds: number) {
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${Math.floor(seconds % 60).toString().padStart(2, "0")}`;
+  }
+
+  if (!video) {
+    return (
+      <AppShell>
+        <p className="text-sand/50">{error || "Loading video…"}</p>
+      </AppShell>
+    );
+  }
+
+  const canManage = user?.role === "administrator" || user?.id === video.owner_id;
+  const latest = jobs[0];
+
+  return (
+    <AppShell>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs uppercase tracking-widest text-moss">{video.original_filename}</p>
+          <h1 className="font-display mt-2 text-4xl">{video.title}</h1>
+          <p className="mt-2 text-sand/60">{video.description || "No description"}</p>
+        </div>
+        <StatusBadge status={video.status} />
+      </div>
+
+      <div className="mt-8 overflow-hidden rounded-2xl border border-white/10 bg-black">
+        <video ref={playerRef} className="aspect-video w-full" controls src={mediaUrl(video.id, "stream")} poster={video.has_thumbnail ? mediaUrl(video.id, "thumbnail") : undefined} />
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <Meta label="Duration" value={video.duration ? `${Math.round(video.duration)}s` : "Pending"} />
+        <Meta label="Resolution" value={video.width ? `${video.width}×${video.height}` : "Pending"} />
+        <Meta label="Size" value={video.file_size ? `${(video.file_size / (1024 * 1024)).toFixed(1)} MB` : "—"} />
+      </div>
+
+      {video.error_message ? <p className="mt-4 text-sm text-red-300">{video.error_message}</p> : null}
+      {error ? <p className="mt-4 text-sm text-red-300">{error}</p> : null}
+
+      <section className="card mt-6 p-6">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs uppercase tracking-widest text-moss">Semantic QA</p>
+          <h2 className="text-xl">Ask a question about this video</h2>
+          <div className="mt-3 flex items-center gap-3">
+            <input 
+              type="text" 
+              className="input flex-1" 
+              placeholder="e.g. How do we calculate the derivative?" 
+              value={searchQuery} 
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && runSearch()}
+              disabled={searching}
+            />
+            <button className="btn-primary" onClick={runSearch} disabled={searching || !searchQuery.trim()}>
+              {searching ? "Searching..." : "Ask Question"}
+            </button>
+          </div>
+          {searchError && <p className="text-sm text-red-400 mt-2">{searchError}</p>}
+          
+          {searchResults.length > 0 && (
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <h3 className="font-medium text-ember mb-3">Top Answer found</h3>
+              <div className="bg-white/5 p-4 rounded-lg flex items-start gap-4">
+                <div className="flex-1">
+                  <p className="text-sm text-sand/90">"{searchResults[0].text}"</p>
+                  <p className="text-xs font-mono text-moss mt-2">Similarity Match: {(searchResults[0].similarity * 100).toFixed(1)}%</p>
+                </div>
+                <button className="btn-ghost flex-shrink-0" onClick={() => seekTo(searchResults[0].start_sec)}>
+                  Jump to {formatTime(searchResults[0].start_sec)}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {canManage ? (
+        <div className="card mt-8 p-6">
+          <h2 className="text-lg font-medium">FFmpeg pipeline</h2>
+          <p className="mt-1 text-sm text-sand/60">
+            Extracts audio and a thumbnail, then generates a timestamped transcript for analysis.
+          </p>
+          <button className="btn-primary mt-4" onClick={processNow} disabled={busy}>
+            {busy ? "Starting processing…" : video.status === "processing" ? "Re-run processing" : "Run processing"}
+          </button>
+          {latest ? (
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-sm">
+                <span>{latest.job_type}</span>
+                <StatusBadge status={latest.status} />
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                <div className="h-full bg-moss" style={{ width: `${latest.progress}%` }} />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <section className="card mt-6 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="text-xs uppercase tracking-widest text-moss">Transcript</p><h2 className="mt-1 text-xl">Generated transcript</h2></div>
+          <StatusBadge status={transcript?.status || "not_started"} />
+        </div>
+        {transcript?.status === "processing" ? <p className="mt-5 text-sand/60">Transcription in progress…</p> : null}
+        {transcript?.status === "failed" ? <p className="mt-5 text-red-300">{transcript.error_message || "Transcription failed. Run processing to try again."}</p> : null}
+        {transcript?.status === "completed" ? <>
+          {editing ? <textarea className="input mt-5 min-h-48" value={transcriptText} onChange={(event) => setTranscriptText(event.target.value)} /> : <p className="mt-5 whitespace-pre-wrap text-sm leading-7 text-sand/80">{transcriptText}</p>}
+          {canManage ? <div className="mt-4 flex gap-3">{editing ? <button className="btn-primary" onClick={saveTranscript} disabled={busy}>Save transcript</button> : <button className="btn-ghost" onClick={() => setEditing(true)}>Edit transcript</button>}{editing ? <button className="btn-ghost" onClick={() => setEditing(false)}>Cancel</button> : null}</div> : null}
+        </> : null}
+      </section>
+
+      <section className="card mt-6 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-widest text-moss">Summary</p><h2 className="mt-1 text-xl">AI summary</h2></div><StatusBadge status={summary?.status || "not_started"} /></div>
+        {summary?.status === "processing" ? <p className="mt-5 text-sand/60">Generating summary…</p> : null}
+        {summary?.status === "failed" ? <p className="mt-5 text-red-300">{summary.error_message || "Summary generation failed. Please try again."}</p> : null}
+        {summary?.status === "completed" ? <div className="mt-5 grid gap-5 md:grid-cols-2"><div><h3 className="font-medium text-ember">Short summary</h3><p className="mt-2 text-sm leading-7 text-sand/80">{summary.short_text}</p></div><div><h3 className="font-medium text-ember">Detailed summary</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-sand/80">{summary.detailed_text}</p></div></div> : null}
+        {canManage ? <button className="btn-primary mt-5" onClick={generateSummary} disabled={busy || summary?.status === "processing" || transcript?.status !== "completed"}>{summary?.status === "completed" ? "Regenerate summary" : "Generate summary"}</button> : null}
+      </section>
+
+      {summary?.status === "completed" && (
+        <section className="card mt-6 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">Multilingual</p>
+              <h2 className="mt-1 text-xl">Offline Translation (Meta NLLB-200)</h2>
+            </div>
+            <StatusBadge status={translatedSummary ? "completed" : "not_started"} />
+          </div>
+          
+          <div className="mt-5 flex items-center gap-4">
+            <select 
+              className="input max-w-xs" 
+              value={targetLang} 
+              onChange={e => setTargetLang(e.target.value)}
+              disabled={translating}
+            >
+              <option value="hin_Deva">Hindi (हिन्दी)</option>
+              <option value="ara_Arab">Arabic (العربية)</option>
+              <option value="fra_Latn">French (Français)</option>
+              <option value="spa_Latn">Spanish (Español)</option>
+              <option value="deu_Latn">German (Deutsch)</option>
+            </select>
+            <button className="btn-primary" onClick={runTranslation} disabled={translating}>
+              {translating ? "Translating natively..." : "Translate Content"}
+            </button>
+          </div>
+
+          {translating && <p className="mt-5 text-sm text-sand/60 animate-pulse">Running Meta NLLB model locally. This uses heavy CPU and may take 1-2 minutes for large transcripts...</p>}
+
+          {!translating && translatedSummary && (
+            <div className="mt-5 border-t border-white/10 pt-5">
+              <h3 className="font-medium text-ember">Translated Summary</h3>
+              <p className="mt-2 text-sm leading-7 text-sand/80">{translatedSummary}</p>
+              
+              <h3 className="mt-6 font-medium text-ember">Translated Transcript</h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-sand/80">{translatedTranscript}</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      <section className="mt-6 grid gap-6 lg:grid-cols-2">
+        <div className="card p-6">
+          <div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-widest text-moss">Topics</p><h2 className="mt-1 text-xl">Detected topics</h2></div><span className="text-xs text-sand/50">{analysis.topics.length}</span></div>
+          {analysis.topics.length ? <ul className="mt-5 space-y-2">{analysis.topics.map((topic) => <li key={topic.id}><button className="flex w-full items-start gap-3 border-b border-white/10 py-3 text-left hover:text-ember" onClick={() => seekTo(topic.start_sec)}><span className="font-mono text-xs text-moss">{formatTime(topic.start_sec)}</span><span className="text-sm">{topic.title}</span></button></li>)}</ul> : <p className="mt-5 text-sm text-sand/50">Analysis will appear after transcription.</p>}
+        </div>
+        <div className="card p-6">
+          <div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-widest text-moss">Key moments</p><h2 className="mt-1 text-xl">Useful highlights</h2></div>{canManage && transcript?.status === "completed" ? <button className="btn-ghost text-xs" onClick={rerunAnalysis} disabled={busy}>Rerun</button> : null}</div>
+          {analysis.key_moments.length ? <ul className="mt-5 space-y-2">{analysis.key_moments.map((moment) => <li key={moment.id}><button className="w-full border-b border-white/10 py-3 text-left hover:text-ember" onClick={() => seekTo(moment.start_sec)}><div className="flex items-center justify-between gap-3"><span className="font-mono text-xs text-moss">{formatTime(moment.start_sec)}</span><span className="text-xs text-sand/50">{moment.score?.toFixed(2)}</span></div><p className="mt-1 line-clamp-2 text-sm text-sand/80">{moment.transcript_text || moment.title}</p></button></li>)}</ul> : <p className="mt-5 text-sm text-sand/50">No highlights detected yet.</p>}
+        </div>
+      </section>
+
+      {user?.role === "learner" && (
+        <section className="card mt-6 p-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">Self Assessment</p>
+              <h2 className="mt-1 text-xl">Learning Questions</h2>
+            </div>
+            <span className="text-xs text-sand/50">{analysis.questions.length}</span>
+          </div>
+          {analysis.questions.length ? (
+            <ol className="mt-5 space-y-4">
+              {analysis.questions.map((item) => (
+                <li key={item.id} className="border-b border-white/10 pb-4 last:border-0">
+                  <div className="flex w-full items-start gap-4">
+                    <span className="mt-1 font-mono text-xs text-moss">Q.</span>
+                    <div className="flex-1">
+                      <span className="text-sm font-medium leading-6">{item.question}</span>
+                      <p className="mt-1 text-xs text-sand/60">Hint: {item.hint}</p>
+                    </div>
+                    <button className="btn-ghost text-xs whitespace-nowrap" onClick={() => seekTo(item.start_sec)}>Review at {formatTime(item.start_sec)}</button>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="mt-5 text-sm text-sand/50">Questions will appear after transcript analysis.</p>
+          )}
+        </section>
+      )}
+
+        {/* ========================================================
+          AI COMPLETE VIDEO NOTES
+      ======================================================== */}
+
+      {video.status === "completed" && transcript?.status === "completed" ? (
+        <section className="card mt-6 p-6">
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+
+            <div>
+              <p className="text-xs uppercase tracking-widest text-moss">
+                AI Study Notes
+              </p>
+
+              <h2 className="mt-1 text-xl">
+                Complete Video Notes
+              </h2>
+
+              <p className="mt-2 text-sm text-sand/60">
+                Generates structured study notes using the
+                transcript and visual information detected
+                from the video.
+              </p>
+            </div>
+
+            <StatusBadge
+              status={
+                notesLoading
+                  ? "processing"
+                  : notes
+                  ? "completed"
+                  : "not_started"
+              }
+            />
+
+          </div>
+
+          {canManage ? (
+            <button
+              type="button"
+              className="btn-primary mt-5"
+              onClick={generateNotes}
+              disabled={notesLoading}
+            >
+              {notesLoading
+                ? "Generating Notes..."
+                : notes
+                ? "Regenerate Notes"
+                : "Generate Notes"}
+            </button>
+          ) : notes ? null : (
+            <p className="mt-5 text-sm text-sand/50">Your educator hasn't generated study notes for this video yet.</p>
+          )}
+
+          {notesLoading ? (
+            <p className="mt-4 text-sm text-sand/60">
+              Analyzing the transcript and visual context
+              from the video. This may take a little time.
+            </p>
+          ) : null}
+
+          {notes ? (
+            <div className="mt-6 border-t border-white/10 pt-6">
+
+              <h3 className="text-lg font-medium text-ember">
+                Study Notes
+              </h3>
+
+<div className="mt-4 text-sm leading-7 text-sand/80">
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    components={{
+      h1: ({ children }) => (
+        <h1 className="mb-5 mt-8 text-2xl font-bold text-sand first:mt-0">
+          {children}
+        </h1>
+      ),
+
+      h2: ({ children }) => (
+        <h2 className="mb-4 mt-7 text-xl font-semibold text-sand">
+          {children}
+        </h2>
+      ),
+
+      h3: ({ children }) => (
+        <h3 className="mb-3 mt-5 text-lg font-semibold text-ember">
+          {children}
+        </h3>
+      ),
+
+      p: ({ children }) => (
+        <p className="mb-4 leading-7 text-sand/80">
+          {children}
+        </p>
+      ),
+
+      ul: ({ children }) => (
+        <ul className="mb-5 ml-6 list-disc space-y-2">
+          {children}
+        </ul>
+      ),
+
+      ol: ({ children }) => (
+        <ol className="mb-5 ml-6 list-decimal space-y-2">
+          {children}
+        </ol>
+      ),
+
+      li: ({ children }) => (
+        <li className="pl-1 leading-7">
+          {children}
+        </li>
+      ),
+
+      strong: ({ children }) => (
+        <strong className="font-semibold text-sand">
+          {children}
+        </strong>
+      ),
+
+      table: ({ children }) => (
+        <div className="my-6 overflow-x-auto rounded-xl border border-white/10">
+          <table className="w-full border-collapse text-sm">
+            {children}
+          </table>
+        </div>
+      ),
+
+      thead: ({ children }) => (
+        <thead className="bg-white/5">
+          {children}
+        </thead>
+      ),
+
+      th: ({ children }) => (
+        <th className="border border-white/10 px-4 py-3 text-left font-semibold text-sand">
+          {children}
+        </th>
+      ),
+
+      td: ({ children }) => (
+        <td className="border border-white/10 px-4 py-3 align-top text-sand/80">
+          {children}
+        </td>
+      ),
+
+      blockquote: ({ children }) => (
+        <blockquote className="my-5 border-l-4 border-moss pl-4 text-sand/70">
+          {children}
+        </blockquote>
+      ),
+
+      code: ({ children }) => (
+        <code className="rounded bg-white/10 px-1.5 py-0.5 text-sm text-ember">
+          {children}
+        </code>
+      ),
+    }}
+  >
+    {notes.replace(/^\\(?=#+\s)/gm, "")}
+  </ReactMarkdown>
+</div>
+
+            </div>
+          ) : null}
+
+        </section>
+      ) : null}
+
+
+</AppShell>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="card p-4">
+      <p className="text-xs uppercase tracking-widest text-sand/40">{label}</p>
+      <p className="mt-1 text-lg">{value}</p>
+    </div>
+  );
+}

@@ -1,0 +1,1020 @@
+"""
+video_routes.py
+---------------
+API endpoints for video management.
+
+POST   /videos/upload       -> Upload/register a video
+GET    /videos              -> Get current user's videos
+GET    /videos/{video_id}  -> Get one video
+DELETE /videos/{video_id}  -> Delete a video
+"""
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    UploadFile,
+    File,
+    status,
+)
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models import Video, User
+from app.auth import get_current_user
+from app.services.notes_service import generate_video_notes
+
+
+router = APIRouter(
+    prefix="/videos",
+    tags=["Videos"]
+)
+
+
+# Directory where uploaded videos will be stored
+UPLOAD_DIR = Path("uploads/videos")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@router.post("/upload", status_code=status.HTTP_201_CREATED)
+def upload_video(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Upload a video for the currently authenticated user.
+    """
+
+    # Basic video-file validation
+    allowed_extensions = {
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".mkv",
+        ".webm",
+    }
+
+    extension = Path(file.filename).suffix.lower()
+
+    if extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported video format",
+        )
+
+    # Create a user-specific directory
+    user_dir = UPLOAD_DIR / str(current_user.id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+
+    # Avoid directly trusting the uploaded filename
+    safe_filename = Path(file.filename).name
+    file_path = user_dir / safe_filename
+
+    # Save uploaded file
+    try:
+        with file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    finally:
+        file.file.close()
+
+    # Save metadata in PostgreSQL
+    extension_clean = extension.lstrip(".")
+    video = Video(
+        user_id=current_user.id,
+        filename=safe_filename,
+        file_path=str(file_path),
+        file_type=extension_clean,
+        status="uploaded",
+    )
+
+    db.add(video)
+    db.commit()
+    db.refresh(video)
+
+    return {
+        "id": video.id,
+        "filename": video.filename,
+        "file_path": video.file_path,
+        "status": video.status,
+        "uploaded_at": video.uploaded_at,
+        "message": "Video uploaded successfully",
+    }
+
+
+from app.schemas import VideoOut
+from app.models import TranscriptChunk
+from fastapi.responses import StreamingResponse, FileResponse
+import mimetypes
+
+@router.get("/", response_model=list[VideoOut])
+def get_my_videos(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return all videos belonging to the authenticated user.
+    """
+
+    videos = (
+        db.query(Video)
+        .order_by(Video.uploaded_at.desc())
+        .all()
+    )
+
+    return videos
+
+
+@router.get("/{video_id}", response_model=VideoOut)
+def get_video(
+    video_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return one video belonging to the authenticated user.
+    """
+
+    video = (
+        db.query(Video)
+        .filter(Video.id == video_id)
+        .first()
+    )
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found",
+        )
+
+    return video
+
+
+@router.delete("/{video_id}")
+def delete_video(
+    video_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Delete a video belonging to the authenticated user.
+    """
+
+    video = (
+        db.query(Video)
+        .filter(
+            Video.id == video_id,
+            Video.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found",
+        )
+
+    # Delete physical file
+    if os.path.exists(video.file_path):
+        os.remove(video.file_path)
+
+    # Delete database record
+    db.delete(video)
+    db.commit()
+
+    return {
+        "message": "Video deleted successfully",
+        "video_id": video_id,
+    }
+
+
+from app.database import SessionLocal
+from app.services.ai_service import generate_video_summary
+from app.services.embedding_service import process_and_store_embeddings, search_transcript_similarity
+from app.services.translation_service import translate_text
+from app.models import TranscriptChunk
+from fastapi import BackgroundTasks
+from pydantic import BaseModel
+
+class TranslationRequest(BaseModel):
+    target_lang: str
+
+@router.post("/{video_id}/translate")
+def translate_video_content(
+    video_id: int,
+    req: TranslationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Translates the video transcript and summary into the target language on-demand.
+    Example langs: hin_Deva (Hindi), mar_Deva (Marathi)
+    """
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+        
+    if not video.summary and not video.transcript:
+        raise HTTPException(status_code=400, detail="Cannot translate empty content. Run AI pipeline first.")
+
+    target_lang = req.target_lang
+    try:
+        translated_summary = translate_text(video.summary, target_lang=target_lang) if video.summary else None
+        
+        # Transcript might be very long. The UI could pass options, but for now we'll translate it all.
+        translated_transcript = translate_text(video.transcript, target_lang=target_lang) if video.transcript else None
+        
+        return {
+            "lang": target_lang,
+            "translated_summary": translated_summary,
+            "translated_transcript": translated_transcript
+        }
+    except Exception as e:
+        print(f"[Translation API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Translation engine failed: {str(e)}")
+
+def extract_video_metadata(file_path: str):
+    """Uses FFprobe to extract duration, width, height from the video file."""
+    import json as _json
+    ffprobe_bin = shutil.which("ffprobe") or r"C:\Users\KHUSHI\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffprobe.exe"
+    try:
+        cmd = [
+            ffprobe_bin, "-v", "quiet", "-print_format", "json",
+            "-show_format", "-show_streams", file_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        data = _json.loads(result.stdout)
+
+        duration = None
+        width = None
+        height = None
+
+        # Get duration from format
+        if "format" in data and "duration" in data["format"]:
+            duration = int(float(data["format"]["duration"]))
+
+        # Get resolution from first video stream
+        for stream in data.get("streams", []):
+            if stream.get("codec_type") == "video":
+                width = stream.get("width")
+                height = stream.get("height")
+                if not duration and "duration" in stream:
+                    duration = int(float(stream["duration"]))
+                break
+
+        return {"duration": duration, "width": width, "height": height}
+    except Exception as e:
+        print(f"[FFprobe] Metadata extraction failed: {e}")
+        return {"duration": None, "width": None, "height": None}
+
+
+def process_video_pipeline_background(video_id: int, file_path: str, filename: str, file_type: str, user_id: int):
+    """Heavy background worker for transcribing and embedding videos natively."""
+    bg_db = SessionLocal()
+    try:
+        video = bg_db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            return
+
+        print(f"\n[Worker] Starting dedicated background AI pipeline for Video {video_id}...")
+
+        # 0. Extract video metadata (Duration, Resolution, File Size) via FFprobe
+        meta = extract_video_metadata(file_path)
+        video.duration = meta.get("duration")
+        video.width = meta.get("width")
+        video.height = meta.get("height")
+        try:
+            video.file_size = os.path.getsize(file_path)
+        except Exception:
+            pass
+        bg_db.commit()
+        print(f"[Worker] Metadata extracted: {meta.get('duration')}s, {meta.get('width')}x{meta.get('height')}, {video.file_size} bytes")
+        
+        # 1. Run Heavy AI Transcript & Summary Module (Whisper & HF (or Extractive NLP fallback))
+        summary_data = generate_video_summary(file_path, filename, file_type)
+        
+        video.summary = summary_data["summary"]
+        video.transcript = summary_data.get("transcript", "Transcript unavailable.")
+        
+        # 2. Delete old chunks so fresh embeddings can be stored on regeneration
+        bg_db.query(TranscriptChunk).filter(TranscriptChunk.video_id == video_id).delete()
+        bg_db.commit()
+        
+        # 3. Offload semantic chunking and native ARRAY(Float) embedding
+        process_and_store_embeddings(video.transcript, video_id, user_id, bg_db)
+
+        # 4. NOW set status to completed so frontend sees everything at once
+        video.status = "completed"
+        bg_db.commit()
+        
+        print(f"[Worker] Pipeline complete! Successfully finished processing Video {video_id}")
+
+    except Exception as e:
+        bg_db.rollback()
+        video = bg_db.query(Video).filter(Video.id == video_id).first()
+        if video:
+            video.status = "failed"
+            video.error_message = str(e)
+            bg_db.commit()
+        print(f"[Worker] Fatal Background Processing Error: {e}")
+    finally:
+        bg_db.close()
+
+@router.api_route("/{video_id}/summary", methods=["GET", "POST"])
+def get_video_summary(
+    video_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Triggers AI summary processing in the background, keeping the API fast and non-blocking.
+    Handles both GET and POST requests from the frontend.
+    """
+    video = (
+        db.query(Video)
+        .filter(Video.id == video_id)
+        .first()
+    )
+
+    if not video:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+
+    # If freshly uploaded, start processing in background
+    if video.status == "uploaded":
+        video.status = "processing"
+        db.commit()
+        background_tasks.add_task(
+            process_video_pipeline_background, 
+            video.id, 
+            video.file_path, 
+            video.filename, 
+            video.file_type or "mp4", 
+            current_user.id
+        )
+
+    # Determine status for summary payload
+    sum_status = "completed" if (video.status == "completed" and video.summary) else ("failed" if video.status == "failed" else "processing")
+    
+    # Split the stored "short|||detailed" summary into two separate parts
+    def split_summary(raw: str | None):
+        if not raw:
+            return "Processing summary...", "Processing detailed summary..."
+        parts = raw.split("|||", 1)
+        short = parts[0].strip()
+        detailed = parts[1].strip() if len(parts) > 1 else short
+        return short, detailed
+
+    short_text, detailed_text = split_summary(video.summary)
+
+    return {
+        "id": str(video.id),
+        "video_id": str(video.id),
+        "status": sum_status,
+        "short_text": short_text,
+        "detailed_text": detailed_text,
+        "keywords": ["AI", "Summary", "Video"],
+        "error_message": "AI Processing failed." if video.status == "failed" else None,
+        "created_at": str(video.uploaded_at),
+        "updated_at": str(video.uploaded_at),
+        # Legacy/Khushi compatibility keys:
+        "filename": video.filename,
+        "summary": short_text,
+        "takeaways": [
+            "Persisted directly from PostgreSQL.",
+            "Automated background processing activated."
+        ],
+        "transcript": video.transcript if video.transcript else "Processing..."
+    }
+
+# --- Utkarsh Frontend Compatibility Routes ---
+
+@router.post("/{video_id}/process")
+def process_video_compat(
+    video_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Triggers background processing when 'Run processing' button is clicked."""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    video.status = "processing"
+    db.commit()
+    background_tasks.add_task(
+        process_video_pipeline_background, 
+        video.id, 
+        video.file_path, 
+        video.filename, 
+        video.file_type or "mp4", 
+        current_user.id
+    )
+    return {
+        "id": str(video.id),
+        "video_id": str(video.id),
+        "job_type": "AI Processing",
+        "status": "running",
+        "progress": 10,
+        "error": None,
+        "created_at": str(video.uploaded_at),
+        "updated_at": str(video.uploaded_at)
+    }
+
+@router.post("/{video_id}/analysis")
+def process_analysis_compat(
+    video_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Triggers background analysis when 'Rerun analysis' button is clicked."""
+    return process_video_compat(video_id, background_tasks, db, current_user)
+
+
+# NOTES
+# ============================================================
+
+@router.post("/{video_id}/notes")
+def generate_video_notes_api(
+    video_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate detailed study notes using:
+
+    - Whisper transcript
+    - OCR information
+    - VLM visual understanding
+
+    The generated notes are stored in PostgreSQL.
+    """
+
+    video = (
+        db.query(Video)
+        .filter(
+            Video.id == video_id,
+            Video.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found",
+        )
+
+    if video.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Video processing is not completed yet.",
+        )
+
+    if not video.transcript:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transcript is not available for this video.",
+        )
+
+    try:
+
+        visual_context = video.visual_context or []
+
+        print(
+            f"[Notes API] Generating notes for "
+            f"Video {video_id}..."
+        )
+
+        print(
+            f"[Notes API] Visual context items available: "
+            f"{len(visual_context)}"
+        )
+
+        notes_result = generate_video_notes(
+            transcript=video.transcript,
+            visual_context=visual_context,
+        )
+
+        # ----------------------------------------------------
+        # Support dictionary and string return values
+        # ----------------------------------------------------
+
+        if isinstance(notes_result, dict):
+
+            generated_notes = notes_result.get(
+                "notes",
+                "",
+            )
+
+            sections_generated = notes_result.get(
+                "sections_generated",
+                0,
+            )
+
+            visuals_used = notes_result.get(
+                "visuals_used",
+                len(visual_context),
+            )
+
+        else:
+
+            generated_notes = str(
+                notes_result
+            )
+
+            sections_generated = 0
+
+            visuals_used = len(
+                visual_context
+            )
+
+        if not generated_notes.strip():
+            raise ValueError(
+                "Notes service returned empty notes."
+            )
+
+        # ----------------------------------------------------
+        # Save notes
+        # ----------------------------------------------------
+
+        video.notes = generated_notes
+
+        db.commit()
+        db.refresh(video)
+
+        print(
+            f"[Notes API] Notes generated successfully "
+            f"for Video {video_id}"
+        )
+
+        return {
+            "video_id": video.id,
+            "status": "completed",
+            "notes": video.notes,
+            "sections_generated": sections_generated,
+            "visuals_used": visuals_used,
+            "visual_context_items": len(
+                visual_context
+            ),
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+
+        db.rollback()
+
+        print(
+            f"[Notes API Error] "
+            f"Video {video_id}: {e}"
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Notes generation failed: {str(e)}",
+        )
+
+
+# ============================================================
+# GET SAVED NOTES
+# ============================================================
+
+@router.get("/{video_id}/notes")
+def get_video_notes_api(
+    video_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return previously generated study notes.
+    """
+
+    video = (
+        db.query(Video)
+        .filter(
+            Video.id == video_id,
+        )
+        .first()
+    )
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found",
+        )
+
+    return {
+        "video_id": video.id,
+        "status": (
+            "completed"
+            if video.notes
+            else "not_generated"
+        ),
+        "notes": video.notes,
+    }
+
+
+# ============================================================
+
+
+
+@router.get("/{video_id}/jobs")
+def get_video_jobs_compat(video_id: int, db: Session = Depends(get_db)):
+    """Provides a Job array for Utkarsh's Dashboard UI."""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        return []
+    if video.status == "processing":
+        return [{
+            "id": str(video.id),
+            "video_id": str(video.id),
+            "job_type": "AI Processing",
+            "status": "running",
+            "progress": 50,
+            "error": None,
+            "created_at": str(video.uploaded_at),
+            "updated_at": str(video.uploaded_at)
+        }]
+    return []
+
+@router.get("/{video_id}/transcript")
+def get_video_transcript_compat(video_id: int, db: Session = Depends(get_db)):
+    """Maps Khushi's transcript to Utkarsh's expected TranscriptItem schema."""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    tr_status = "completed" if (video.status == "completed" and video.transcript) else ("failed" if video.status == "failed" else "processing")
+    return {
+        "id": str(video.id),
+        "video_id": str(video.id),
+        "status": tr_status,
+        "language": "en",
+        "full_text": video.transcript if video.transcript else None,
+        "edited_text": None,
+        "error_message": "Transcript failed" if video.status == "failed" else None,
+        "created_at": str(video.uploaded_at),
+        "updated_at": str(video.uploaded_at)
+    }
+
+from app.services.scoring_service import score_segments
+from app.services.learning_questions import generate_questions_for_chunks
+
+@router.get("/{video_id}/analysis")
+def get_video_analysis_compat(video_id: int, db: Session = Depends(get_db)):
+    """
+    Returns real key moments and topics extracted from TranscriptChunk data.
+    Now enriched with Sanjana's ML scores and Utkarsh's generated learning questions!
+    """
+    chunks = (
+        db.query(TranscriptChunk)
+        .filter(TranscriptChunk.video_id == video_id)
+        .order_by(TranscriptChunk.chunk_index.asc())
+        .all()
+    )
+
+    if not chunks:
+        return {"topics": [], "key_moments": [], "questions": []}
+        
+    chunk_texts = [c.chunk_text for c in chunks]
+    # Sanjana's ML scoring service
+    scores = score_segments(chunk_texts) if chunk_texts else []
+
+    # Build Topics from chunks
+    topics = []
+    for i, chunk in enumerate(chunks):
+        words_before = sum(len(c.chunk_text.split()) for c in chunks if c.chunk_index < chunk.chunk_index)
+        start_sec = round((words_before / 130) * 60)
+        end_sec = round(((words_before + len(chunk.chunk_text.split())) / 130) * 60)
+        
+        raw_sentence = chunk.chunk_text.split(".")[0].strip()
+        raw_sentence = raw_sentence.lstrip(", .;-")
+        if raw_sentence:
+            raw_sentence = raw_sentence[0].upper() + (raw_sentence[1:] if len(raw_sentence) > 1 else "")
+        
+        first_sentence = raw_sentence[:80]
+        if len(raw_sentence) > 80:
+            first_sentence += "..."
+        
+        # Attach Sanjana's scores safely
+        importance_score = scores[i].get("importance_score", 0.0) if i < len(scores) else 0.0
+        
+        topics.append({
+            "id": str(chunk.id),
+            "video_id": str(video_id),
+            "start_sec": start_sec,
+            "end_sec": end_sec,
+            "title": first_sentence if first_sentence else f"Section {chunk.chunk_index + 1}",
+            "transcript_text": chunk.chunk_text[:200],
+            "importance_score": importance_score,
+            "created_at": str(chunk.created_at)
+        })
+
+    # Build Key Moments — pick the top 5 most "important" chunks based on Sanjana's scoring
+    sorted_by_importance = sorted(topics, key=lambda c: c.get("importance_score", 0), reverse=True)
+    top_chunks = sorted_by_importance[:5]
+
+    key_moments = []
+    for i, chunk in enumerate(top_chunks):
+        key_moments.append({
+            "id": chunk["id"],
+            "video_id": chunk["video_id"],
+            "topic_id": chunk["id"],
+            "start_sec": chunk["start_sec"],
+            "end_sec": chunk["end_sec"],
+            "title": chunk["title"],
+            "transcript_text": chunk["transcript_text"],
+            "score": chunk.get("importance_score", 0.0),
+            "moment_type": "high_importance",
+            "created_at": chunk["created_at"]
+        })
+        
+    # Utkarsh's Learning Questions generated from key moments
+    questions = generate_questions_for_chunks(key_moments)
+
+    return {"topics": topics, "key_moments": key_moments, "questions": questions}
+
+
+@router.get("/{video_id}/search")
+def semantic_search_video(video_id: int, q: str, top_k: int = 5, db: Session = Depends(get_db)):
+    """
+    Personalized Q&A Video Search (Extractive).
+    Uses SentenceTransformer embeddings to find the most relevant chunk of transcript.
+    """
+    if not q or not q.strip():
+        return {"results": []}
+
+    chunks = db.query(TranscriptChunk).filter(TranscriptChunk.video_id == video_id).order_by(TranscriptChunk.chunk_index.asc()).all()
+    if not chunks:
+        return {"results": [], "message": "Video has no transcript yet."}
+
+    # Generate embeddings and similarities
+    chunk_texts = [c.chunk_text for c in chunks]
+    
+    # We can embed the query and transcript chunks to find the closest match.
+    from app.services.scoring_service import model
+    from sklearn.metrics.pairwise import cosine_similarity
+    
+    query_vector = model.encode([q], convert_to_numpy=True, normalize_embeddings=True)
+    chunk_vectors = model.encode(chunk_texts, convert_to_numpy=True, normalize_embeddings=True)
+    
+    similarities = cosine_similarity(query_vector, chunk_vectors)[0]
+    
+    results = []
+    for i, c in enumerate(chunks):
+        # Calculate start_sec approximation exactly like in key_moments
+        words_before = sum(len(chk.chunk_text.split()) for chk in chunks if chk.chunk_index < c.chunk_index)
+        start_sec = round((words_before / 130) * 60)
+        results.append({
+            "chunk_index": c.chunk_index,
+            "text": c.chunk_text,
+            "similarity": float(similarities[i]),
+            "importance_score": float(similarities[i]), # For UI compatibility
+            "start_sec": start_sec
+        })
+        
+    # Sort by highest similarity
+    results = sorted(results, key=lambda x: x["similarity"], reverse=True)[:top_k]
+    return {"results": results}
+
+@router.get("/{video_id}/stream")
+def stream_video(video_id: int, db: Session = Depends(get_db)):
+    """
+    Streams the raw video file to the browser <video> tag.
+    No auth required here so the player can load without token issues.
+    """
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    file_path = video.file_path
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Video file not found on disk")
+
+    mime_type, _ = mimetypes.guess_type(file_path)
+    mime_type = mime_type or "video/mp4"
+    return FileResponse(file_path, media_type=mime_type, filename=video.filename)
+
+
+THUMBNAIL_DIR = Path("uploads/thumbnails")
+THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
+
+@router.get("/{video_id}/thumbnail")
+def get_thumbnail(video_id: int, db: Session = Depends(get_db)):
+    """Serves the extracted JPEG thumbnail image for the video."""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    thumb_path = THUMBNAIL_DIR / f"{video_id}.jpg"
+
+    # Generate on demand if missing but video file exists
+    if not thumb_path.exists() and os.path.exists(video.file_path):
+        import shutil
+        ffmpeg_bin = shutil.which("ffmpeg") or r"C:\Users\KHUSHI\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffmpeg.exe"
+        try:
+            cmd = [ffmpeg_bin, "-y", "-ss", "00:00:01", "-i", str(video.file_path), "-vframes", "1", "-q:v", "2", str(thumb_path)]
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception as e:
+            print(f"[Thumbnail Error] Could not extract thumbnail for {video_id}: {e}")
+
+    if thumb_path.exists():
+        return FileResponse(str(thumb_path), media_type="image/jpeg")
+
+    # Fallback to streaming video frame if thumbnail file unavailable
+    if os.path.exists(video.file_path):
+        return FileResponse(video.file_path, media_type="video/mp4")
+
+    raise HTTPException(status_code=404, detail="Thumbnail unavailable")
+
+
+# --- Sanjana's Similarity & Importance Scoring Search Endpoint ---
+from fastapi import Query
+
+@router.get("/{video_id}/search")
+def search_video_transcript(
+    video_id: int,
+    q: str = Query(..., min_length=1, description="Search query to find relevant transcript moments"),
+    top_k: int = Query(5, description="Number of top results to return"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Sanjana's Semantic Search: finds the most relevant transcript chunks for a query.
+    Uses cosine similarity on 384-dimensional all-MiniLM-L6-v2 embeddings.
+    Returns results ranked by importance_score (0-100%).
+    """
+    results = search_transcript_similarity(
+        query=q,
+        video_id=video_id,
+        user_id=current_user.id,
+        db=db,
+        top_k=top_k
+    )
+
+    if not results:
+        return {
+            "query": q,
+            "video_id": video_id,
+            "results": [],
+            "message": "No embeddings found for this video. Please generate summary first."
+        }
+
+    return {
+        "query": q,
+        "video_id": video_id,
+        "total_results": len(results),
+        "results": results  # [{chunk_index, text, similarity, importance_score}]
+    }
+
+
+# --- Main Analytical Dashboard Endpoint ---
+from datetime import datetime, timedelta
+
+@router.get("/analytics/dashboard")
+def get_analytics_dashboard(
+    days: int = Query(7, ge=0, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Computes real-time analytical metrics, time-series, status distributions,
+    duration histograms, key insights, and recent activity from PostgreSQL.
+    """
+    now = datetime.now()
+    raw_videos = db.query(Video).order_by(Video.uploaded_at.desc()).all()
+
+    if days > 0:
+        cutoff_date = (now - timedelta(days=days)).date()
+        all_videos = [v for v in raw_videos if v.uploaded_at and v.uploaded_at.date() >= cutoff_date]
+    else:
+        all_videos = raw_videos
+
+    total_videos = len(all_videos)
+    completed_videos = sum(1 for v in all_videos if v.status == "completed")
+    processing_videos = sum(1 for v in all_videos if v.status in ("processing", "running", "queued"))
+    uploaded_videos = sum(1 for v in all_videos if v.status == "uploaded")
+    failed_videos = sum(1 for v in all_videos if v.status == "failed")
+
+    transcripts_generated = sum(1 for v in all_videos if v.transcript and len(v.transcript.strip()) > 0)
+    summaries_generated = sum(1 for v in all_videos if v.summary and len(v.summary.strip()) > 0)
+
+    total_duration_sec = 0
+    duration_buckets = {
+        "< 1 min": 0,
+        "1 - 3 mins": 0,
+        "3 - 5 mins": 0,
+        "5 - 10 mins": 0,
+        "10+ mins": 0,
+    }
+
+    for v in all_videos:
+        words = len(v.transcript.split()) if v.transcript else 0
+        dur = round((words / 130) * 60) if words > 0 else 60
+        total_duration_sec += dur
+
+        if dur < 60:
+            duration_buckets["< 1 min"] += 1
+        elif dur < 180:
+            duration_buckets["1 - 3 mins"] += 1
+        elif dur < 300:
+            duration_buckets["3 - 5 mins"] += 1
+        elif dur < 600:
+            duration_buckets["5 - 10 mins"] += 1
+        else:
+            duration_buckets["10+ mins"] += 1
+
+    avg_duration_sec = round(total_duration_sec / total_videos) if total_videos > 0 else 0
+    success_rate = round((completed_videos / total_videos * 100), 1) if total_videos > 0 else 100.0
+
+    def format_dur(sec):
+        if sec < 60:
+            return f"{sec}s"
+        mins = sec // 60
+        rem_sec = sec % 60
+        if mins < 60:
+            return f"{mins}m {rem_sec}s" if rem_sec > 0 else f"{mins}m"
+        hrs = mins // 60
+        rem_m = mins % 60
+        return f"{hrs}h {rem_m}m"
+
+    num_days = days if days > 0 else 7
+    time_series = []
+    for i in range(num_days - 1, -1, -1):
+        target_date = (now - timedelta(days=i)).date()
+        date_label = target_date.strftime("%b %d")
+        
+        day_vids = [v for v in all_videos if v.uploaded_at and v.uploaded_at.date() == target_date]
+        time_series.append({
+            "date": date_label,
+            "uploaded": len(day_vids),
+            "completed": sum(1 for v in day_vids if v.status == "completed"),
+            "failed": sum(1 for v in day_vids if v.status == "failed"),
+        })
+
+    status_distribution = [
+        {"name": "Completed", "value": completed_videos, "color": "#10B981"},
+        {"name": "Processing", "value": processing_videos, "color": "#F59E0B"},
+        {"name": "Uploaded", "value": uploaded_videos, "color": "#3B82F6"},
+        {"name": "Failed", "value": failed_videos, "color": "#EF4444"},
+    ]
+
+    duration_distribution = [
+        {"range": label, "count": count} for label, count in duration_buckets.items()
+    ]
+
+    insights = []
+    if total_videos == 0:
+        insights.append(f"No videos uploaded in the selected timeframe ({days} days).")
+    else:
+        insights.append(f"Overall processing success rate is {success_rate}% across {total_videos} video(s).")
+        insights.append(f"Total video content duration equals ~{format_dur(total_duration_sec)} (avg {format_dur(avg_duration_sec)} per video).")
+        insights.append(f"AI models have generated {transcripts_generated} transcripts and {summaries_generated} summaries.")
+        if failed_videos > 0:
+            insights.append(f"⚠️ {failed_videos} video(s) failed during processing.")
+        else:
+            insights.append("✅ Zero pipeline failures recorded. System operating at 100% stability.")
+
+    recent_activity = []
+    for v in all_videos[:8]:
+        words = len(v.transcript.split()) if v.transcript else 0
+        dur_str = format_dur(round((words / 130) * 60) if words > 0 else 60)
+        recent_activity.append({
+            "id": str(v.id),
+            "title": v.filename,
+            "status": v.status,
+            "uploaded_at": v.uploaded_at.strftime("%b %d, %H:%M") if v.uploaded_at else "Recently",
+            "owner_name": (v.owner.name if v.owner else None) or "Creator",
+            "duration": dur_str
+        })
+
+    return {
+        "days": days,
+        "metrics": {
+            "total_videos": total_videos,
+            "completed_videos": completed_videos,
+            "transcripts_generated": transcripts_generated,
+            "summaries_generated": summaries_generated,
+            "total_duration_sec": total_duration_sec,
+            "total_duration_formatted": format_dur(total_duration_sec),
+            "avg_duration_sec": avg_duration_sec,
+            "avg_duration_formatted": format_dur(avg_duration_sec),
+            "success_rate": success_rate,
+            "failed_processing": failed_videos,
+        },
+        "over_time": time_series,
+        "status_distribution": status_distribution,
+        "duration_distribution": duration_distribution,
+        "insights": insights,
+        "recent_activity": recent_activity,
+    }

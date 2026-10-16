@@ -1,0 +1,32 @@
+# Uploads & Media
+uploads/
+backend/uploads/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# Node & Next.js
+node_modules/
+.next/
+out/
+build/
+*.log
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+venv/
+env/
+ENV/
+.env
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
