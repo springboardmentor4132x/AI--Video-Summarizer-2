@@ -1,110 +1,72 @@
-# ClipMind AI 🚀
-### Video Summarization & Key Moments Detection Platform
+# 🚀 ClipMind: AI Video Studio
 
-ClipMind AI is an intelligent web application designed to help users consume long-form videos efficiently by extracting transcripts, generating concise AI summaries, and detecting key video moments with timestamps.
-
----
-
-## 📌 Module 1 — Core Infrastructure & Authentication
-
-Module 1 sets up the core foundation of ClipMind AI:
-
-- **User Registration**: Register new user accounts with full name, email, password, and system role.
-- **Secure Authentication**: Passwords hashed securely using `bcrypt`.
-- **JWT Authentication**: Json Web Tokens (JWT) issued upon login to secure all private backend APIs.
-- **Role-Based Access Control (RBAC)**: Enforces access restrictions across 4 distinct user roles:
-  - 🎥 **Content Creator**: Uploads videos, manages transcripts, and views content analytics.
-  - 🎓 **Learner**: Watches videos, reads summaries, searches transcripts, and saves highlights.
-  - 👩‍🏫 **Educator**: Prepares educational lecture summaries and tracks classroom engagement.
-  - 🛠️ **Administrator**: Oversees users, AI processing pipelines, and system configuration.
-- **Database Storage**: PostgreSQL database managed cleanly with SQLAlchemy ORM models.
+Watch less. Understand more. ClipMind is a full-stack, AI-powered video summarization platform designed to extract audio, generate highly-accurate transcripts, and write structured study notes so students, creators, and educators can skip to exactly what matters.
 
 ---
 
-## 🛠️ Technology Stack
+## 🎯 Problem Statement (PS)
+In the modern educational and content creation era, individuals consume hours of long-form video content daily. The core problem is **inefficiency**: watching a 45-minute lecture or tutorial to find 2 minutes of relevant information is incredibly time-consuming. Students struggle to create organized study notes while watching, and content creators lack fast ways to analyze and chapter their own lengthy uploads.
 
-- **Backend Framework**: Python FastAPI
-- **Database**: PostgreSQL with SQLAlchemy ORM
-- **Security & Auth**: JWT (`python-jose`), Password Hashing (`bcrypt`)
-
-
----
-
-## 📂 Folder Structure
-
-```text
-ClipMind-AI/
-│
-├── backend/
-│   ├── app/
-│   │   ├── main.py          # FastAPI application entry point
-│   │   ├── database.py      # SQLAlchemy database connection & session setup
-│   │   ├── models.py        # Database ORM models (User, Video)
-│   │   ├── schemas.py       # Pydantic data validation schemas
-│   │   ├── auth.py          # JWT creation, bcrypt hashing & RBAC logic
-│   │   └── routes/
-│   │       └── auth_routes.py # Auth endpoints (/register, /login, /me)
-│   ├── .env                 # Environment configuration (Database URL, JWT Secret)
-│   └── requirements.txt     # Python backend dependencies
-│
-├── frontend/                # React / Next.js user interface (coming next)
-├── tests/
-│   └── test_auth.py         # Automated authentication integration test suite
-└── README.md
-```
+## 💡 Our Solution
+ClipMind solves this by utilizing massive, state-of-the-art AI models (OpenAI Whisper & HuggingFace Transformers) to automatically watch the video for you. 
+By uploading a video to our secure platform, ClipMind intelligently rips the audio, transcribes it word-for-word, semantically analyzes the text, and produces detailed, chapterized summaries and study notes. We deployed this into a highly-scalable Hybrid Cloud Architecture, delivering the speed of a Vercel-hosted Next.js frontend with the raw mathematical power of a Google Cloud Platform (GCP) GPU-enabled backend.
 
 ---
 
-## 🚀 How to Set Up and Run
+## ⚙️ Core Technical Features & Implementation
 
-### 1. Navigating to the Backend
-Open your terminal in the project directory and move into `backend`:
-```bash
-cd backend
-```
+### 1. Robust Video Upload & Metadata Extraction
+- **Logic:** Videos uploaded via the React UI are securely transmitted directly to the Google Cloud Virtual Machine.
+- **Implementation:** FFmpeg (`ffprobe`) runs natively on the heavy Linux server to extract rich metadata (duration, resolution, file size) flawlessly before processing even begins.
 
-### 2. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
+### 2. High-Fidelity Audio Transcription (Offline Whisper STT)
+- **Logic:** We specifically avoided expensive cloud APIs by running the Speech-to-Text inference directly on our own server.
+- **Implementation:** Integrated `openai-whisper` inside a completely containerized Docker environment. It automatically extracts the `.mp3` audio track, maps the waveform to text, and aligns timestamp chunks accurately to seconds.
 
-### 3. Configure Database & Environment
-Make sure `.env` contains your PostgreSQL connection string and secret key:
-```env
-DATABASE_URL=postgresql://postgres:your_password@localhost:5432/clipmind_db
-JWT_SECRET_KEY=your_random_secret_key
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-```
+### 3. Extractive NLP Summarization (TF-IDF & Transformers)
+- **Logic:** Transcripts are often hundreds of pages long. We process the raw text into distinct embeddings.
+- **Implementation:** Using `sentence-transformers` and `scikit-learn`, the text is tokenized, vectorized, and scored for semantic importance. The Top-K most crucial sentences are clustered into a "Short" and "Detailed" summary output. 
 
-### 4. Start the Backend Server
-```bash
-uvicorn app.main:app --reload
-```
-or run using Python directly:
-```bash
-python -m uvicorn app.main:app --reload
-```
+### 4. Semantic Search & Intelligent Chapters
+- **Logic:** Users need to quickly jump to the exact second a topic was mentioned.
+- **Implementation:** The transcription chunks are stored inside a PostgreSQL database using `pgvector`. This allows lightning-fast cosine similarity lookups when a user queries for a specific concept.
+
+### 5. Multi-Language AI Translation
+- **Logic:** Education must be accessible to students worldwide.
+- **Implementation:** Integrated `argostranslate` natively inside the Python environment to translate the massive, complex generated summaries into multiple dialects in real-time.
 
 ---
 
-## 🌐 API Endpoints & Testing
+## 📸 Platform Walkthrough & Gallery
 
-Once the server is running, open your browser and navigate to:
-👉 **`http://127.0.0.1:8000/docs`**
+### 1. The Landing Page
+![Landing Page](screenshots/img1.jpeg)
+*A stunning, highly-responsive entrance. It instantly communicates the value proposition to educators and students, offering direct routes to Create an Account or securely Sign in via our JWT authentication layer.*
 
-| Method | Endpoint | Description | Access Level |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/auth/register` | Register a new user account | Public |
-| `POST` | `/auth/login` | Log in with email & password, returns JWT token | Public |
-| `GET` | `/auth/me` | Retrieve currently logged-in user profile | Authenticated |
-| `GET` | `/auth/admin-check` | Demo endpoint for testing RBAC | Administrator Only |
+### 2. Live Analytics Studio
+![Analytics Dashboard](screenshots/img2.jpeg)
+*Our command center. This provides a real-time mathematical breakdown of platform health. It tracks total videos, successful AI pipelines, and average video duration. We utilized specialized Donut and Line charts to visually display the exact processing trends over 7, 30, and 90 days.*
 
----
+### 3. Key Insights & Activity Feed
+![Insights & Feed](screenshots/img3.jpeg)
+*On the right side of the dashboard, users see a chronological history of their exact uploads along with AI-generated insights indicating total uptime, success rates, and pipeline stability.*
 
-## 🧪 Running Automated Tests
+### 4. Processing Library
+![Video Library](screenshots/img4.jpeg)
+*The central hub for all uploaded media. It dynamically fetches the high-resolution thumbnails generated natively by FFmpeg and clearly displays the processing status (Uploaded -> Processing -> Completed).*
 
-To run the full authentication test suite:
-```bash
-python tests/test_auth.py
-```
+### 5. AI Summary Generation
+![AI Summary Page](screenshots/img5.jpeg)
+*The end result of our heavy ML backend. On the left, it provides a punchy, one-sentence Short Summary. On the right, it provides a deeply detailed, extractive summary analyzing the entire context of the video.*
+
+### 6. AI Structured Study Notes
+![Study Notes Example 1](screenshots/img6.jpeg)
+![Study Notes Example 2](screenshots/img7.jpeg)
+![Study Notes Example 3](screenshots/img8.jpeg)
+*Using the transcript, ClipMind creates perfectly organized, heading-separated study notes. This allows viewers to easily digest complex topics (like Machine Learning vs Traditional Programming) into readable bullet-points.*
+
+### 7. Semantic QA (Video Search)
+![Semantic QA Example 1](screenshots/img9.jpeg)
+![Semantic QA Example 2](screenshots/img10.jpeg)
+![Semantic QA Example 3](screenshots/img11.jpeg)
+*Students can ask raw questions (e.g., "What is a normal algorithm?"). Using PostgreSQL `pgvector`, the AI mathematically calculates Cosine Similarity across all transcript chunks and successfully jumps the user to the exact timestamp (e.g., `1:05`) where it was mentioned!*
